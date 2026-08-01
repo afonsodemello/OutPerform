@@ -18,10 +18,12 @@ import AuthenticationServices
 import UIKit
 
 enum GoogleHealthConfig {
-    /// Compile-time default. Can be overridden at runtime from the in-app
-    /// "Connect Google Health" screen (stored in UserDefaults) so users don't
-    /// have to edit code and rebuild.
-    static let defaultClientID = "REDACTED_GOOGLE_OAUTH_CLIENT_ID"
+    /// Compile-time default, sourced from `GoogleClientID.swift` (a tracked
+    /// file kept blank in git via `git update-index --skip-worktree` — see
+    /// that file's header comment). Can also be overridden at runtime from
+    /// the in-app "Connect Google Health" screen (stored in UserDefaults) so
+    /// users don't have to edit code and rebuild.
+    static let defaultClientID = GoogleClientID.value
     private static let clientIDKey = "googleClientID"
 
     static var clientID: String {
