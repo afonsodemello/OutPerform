@@ -1,0 +1,215 @@
+//
+//  HealthKitProvider.swift
+//  OutPerform
+//
+//  Apple Health backend. Reads every biometric the app uses and exposes them
+//  as source-agnostic samples.
+//
+
+import Foundation
+import HealthKit
+
+final class HealthKitProvider: HealthDataProvider {
+    let sourceType: DataSourceType = .appleHealth
+    private let store = HKHealthStore()
+
+    func isAvailable() -> Bool { HKHealthStore.isHealthDataAvailable() }
+
+    // MARK: Types we read
+
+    private var readTypes: Set<HKObjectType> {
+        var types: Set<HKObjectType> = [
+            HKQuantityType(.heartRate),
+            HKQuantityType(.heartRateVariabilitySDNN),
+            HKQuantityType(.restingHeartRate),
+            HKQuantityType(.respiratoryRate),
+            HKQuantityType(.oxygenSaturation),
+            HKQuantityType(.vo2Max),
+            HKQuantityType(.activeEnergyBurned),
+            HKCategoryType(.sleepAnalysis),
+            HKSeriesType.heartbeat(),          // beat-to-beat RR for true HRV
+            HKObjectType.workoutType()
+        ]
+        if #available(iOS 16.0, *) {
+            types.insert(HKQuantityType(.appleSleepingWristTemperature))
+        }
+        return types
+    }
+
+    func requestAuthorization() async throws {
+        guard HKHealthStore.isHealthDataAvailable() else { throw HealthDataError.notAvailable }
+        try await store.requestAuthorization(toShare: [], read: readTypes)
+    }
+
+    // MARK: Generic quantity query
+
+    private func quantitySamples(_ type: HKQuantityType, unit: HKUnit,
+                                 from: Date, to: Date) async throws -> [QuantitySample] {
+        let predicate = HKQuery.predicateForSamples(withStart: from, end: to, options: .strictStartDate)
+        let sort = [NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)]
+        return try await withCheckedThrowingContinuation { cont in
+            let q = HKSampleQuery(sampleType: type, predicate: predicate,
+                                  limit: HKObjectQueryNoLimit, sortDescriptors: sort) { _, samples, error in
+                if let error { cont.resume(throwing: error); return }
+                let result = (samples as? [HKQuantitySample] ?? []).map {
+                    QuantitySample(start: $0.startDate, end: $0.endDate, value: $0.quantity.doubleValue(for: unit))
+                }
+                cont.resume(returning: result)
+            }
+            store.execute(q)
+        }
+    }
+
+    func heartRates(from: Date, to: Date) async throws -> [QuantitySample] {
+        try await quantitySamples(HKQuantityType(.heartRate),
+                                  unit: HKUnit.count().unitDivided(by: .minute()), from: from, to: to)
+    }
+
+    func hrvSDNN(from: Date, to: Date) async throws -> [QuantitySample] {
+        try await quantitySamples(HKQuantityType(.heartRateVariabilitySDNN),
+                                  unit: HKUnit.secondUnit(with: .milli), from: from, to: to)
+    }
+
+    /// True beat-to-beat RR intervals (ms) reconstructed from the heartbeat
+    /// series (Apple Watch). Each series sample is expanded via
+    /// `HKHeartbeatSeriesQuery`; consecutive beat timestamps give the RR
+    /// interval, skipping any beat flagged `precededByGap`.
+    func beatToBeatRR(from: Date, to: Date) async throws -> [QuantitySample] {
+        let predicate = HKQuery.predicateForSamples(withStart: from, end: to, options: .strictStartDate)
+        let sort = [NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)]
+        let series: [HKHeartbeatSeriesSample] = try await withCheckedThrowingContinuation { cont in
+            let q = HKSampleQuery(sampleType: HKSeriesType.heartbeat(), predicate: predicate,
+                                  limit: HKObjectQueryNoLimit, sortDescriptors: sort) { _, samples, error in
+                if let error { cont.resume(throwing: error); return }
+                cont.resume(returning: samples as? [HKHeartbeatSeriesSample] ?? [])
+            }
+            store.execute(q)
+        }
+
+        var out: [QuantitySample] = []
+        for sample in series {
+            let beats = try await expand(series: sample)
+            out.append(contentsOf: beats)
+        }
+        return out
+    }
+
+    /// Stream one heartbeat series into RR-interval samples.
+    private func expand(series sample: HKHeartbeatSeriesSample) async throws -> [QuantitySample] {
+        try await withCheckedThrowingContinuation { cont in
+            var lastOffset: Double? = nil
+            var rr: [QuantitySample] = []
+            let q = HKHeartbeatSeriesQuery(heartbeatSeries: sample) { _, timeSinceStart, precededByGap, done, error in
+                if let error { cont.resume(throwing: error); return }
+                if !precededByGap, let last = lastOffset {
+                    let intervalMs = (timeSinceStart - last) * 1000
+                    if intervalMs > 250 && intervalMs < 2000 {   // physiologic 30–240 bpm
+                        let beatTime = sample.startDate.addingTimeInterval(timeSinceStart)
+                        rr.append(QuantitySample(date: beatTime, value: intervalMs))
+                    }
+                }
+                lastOffset = timeSinceStart
+                if done { cont.resume(returning: rr) }
+            }
+            store.execute(q)
+        }
+    }
+
+    func restingHeartRate(from: Date, to: Date) async throws -> [QuantitySample] {
+        try await quantitySamples(HKQuantityType(.restingHeartRate),
+                                  unit: HKUnit.count().unitDivided(by: .minute()), from: from, to: to)
+    }
+
+    func respiratoryRate(from: Date, to: Date) async throws -> [QuantitySample] {
+        try await quantitySamples(HKQuantityType(.respiratoryRate),
+                                  unit: HKUnit.count().unitDivided(by: .minute()), from: from, to: to)
+    }
+
+    func oxygenSaturation(from: Date, to: Date) async throws -> [QuantitySample] {
+        // HealthKit reports a 0–1 fraction; convert to percent.
+        let pct = try await quantitySamples(HKQuantityType(.oxygenSaturation),
+                                             unit: .percent(), from: from, to: to)
+        return pct.map { QuantitySample(start: $0.start, end: $0.end, value: $0.value * 100) }
+    }
+
+    func wristTemperature(from: Date, to: Date) async throws -> [QuantitySample] {
+        guard #available(iOS 16.0, *) else { return [] }
+        return try await quantitySamples(HKQuantityType(.appleSleepingWristTemperature),
+                                         unit: .degreeCelsius(), from: from, to: to)
+    }
+
+    func vo2Max(from: Date, to: Date) async throws -> [QuantitySample] {
+        let unit = HKUnit.literUnit(with: .milli).unitDivided(by: HKUnit.gramUnit(with: .kilo).unitMultiplied(by: .minute()))
+        return try await quantitySamples(HKQuantityType(.vo2Max), unit: unit, from: from, to: to)
+    }
+
+    // MARK: Sleep
+
+    func sleepSegments(from: Date, to: Date) async throws -> [SleepSegment] {
+        let type = HKCategoryType(.sleepAnalysis)
+        let predicate = HKQuery.predicateForSamples(withStart: from, end: to, options: .strictStartDate)
+        let sort = [NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)]
+        return try await withCheckedThrowingContinuation { cont in
+            let q = HKSampleQuery(sampleType: type, predicate: predicate,
+                                  limit: HKObjectQueryNoLimit, sortDescriptors: sort) { _, samples, error in
+                if let error { cont.resume(throwing: error); return }
+                let segments = (samples as? [HKCategorySample] ?? []).compactMap { Self.mapSleep($0) }
+                cont.resume(returning: segments)
+            }
+            store.execute(q)
+        }
+    }
+
+    private static func mapSleep(_ s: HKCategorySample) -> SleepSegment? {
+        guard let value = HKCategoryValueSleepAnalysis(rawValue: s.value) else { return nil }
+        let stage: SleepStage
+        switch value {
+        case .inBed: stage = .inBed
+        case .awake: stage = .awake
+        case .asleepCore: stage = .core
+        case .asleepDeep: stage = .deep
+        case .asleepREM: stage = .rem
+        case .asleepUnspecified: stage = .asleepUnspecified
+        @unknown default: stage = .asleepUnspecified
+        }
+        return SleepSegment(start: s.startDate, end: s.endDate, stage: stage)
+    }
+
+    // MARK: Workouts
+
+    func workouts(from: Date, to: Date) async throws -> [WorkoutSession] {
+        let predicate = HKQuery.predicateForSamples(withStart: from, end: to, options: .strictStartDate)
+        let sort = [NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)]
+        let workouts: [HKWorkout] = try await withCheckedThrowingContinuation { cont in
+            let q = HKSampleQuery(sampleType: .workoutType(), predicate: predicate,
+                                  limit: HKObjectQueryNoLimit, sortDescriptors: sort) { _, samples, error in
+                if let error { cont.resume(throwing: error); return }
+                cont.resume(returning: samples as? [HKWorkout] ?? [])
+            }
+            store.execute(q)
+        }
+
+        var sessions: [WorkoutSession] = []
+        for w in workouts {
+            let hr = try await heartRates(from: w.startDate, to: w.endDate)
+            let energy = w.statistics(for: HKQuantityType(.activeEnergyBurned))?
+                .sumQuantity()?.doubleValue(for: .kilocalorie())
+            sessions.append(WorkoutSession(start: w.startDate, end: w.endDate,
+                                           activity: Self.mapActivity(w.workoutActivityType),
+                                           heartRates: hr, activeEnergyKcal: energy))
+        }
+        return sessions
+    }
+
+    private static func mapActivity(_ type: HKWorkoutActivityType) -> WorkoutActivity {
+        switch type {
+        case .traditionalStrengthTraining, .functionalStrengthTraining: return .weightlifting
+        case .highIntensityIntervalTraining, .crossTraining: return .hiit
+        case .yoga, .pilates, .flexibility, .mindAndBody: return .yoga
+        case .running: return .running
+        case .cycling: return .cycling
+        case .walking, .hiking: return .walking
+        default: return .other
+        }
+    }
+}
