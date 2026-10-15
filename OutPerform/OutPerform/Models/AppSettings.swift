@@ -12,12 +12,14 @@ import Observation
 public enum DataSourceType: String, CaseIterable, Sendable, Codable {
     case appleHealth
     case googleHealth
+    case bluetooth
     case demo
 
     public var displayName: String {
         switch self {
         case .appleHealth:  return "Apple Health"
         case .googleHealth: return "Google Health"
+        case .bluetooth:    return "Bluetooth band"
         case .demo:         return "Demo"
         }
     }
@@ -28,6 +30,8 @@ public enum DataSourceType: String, CaseIterable, Sendable, Codable {
             return "Reads directly from Apple Health on this iPhone (HealthKit). Best if your wearable already syncs to Health."
         case .googleHealth:
             return "Connects to your Google account via the Google Health API (the platform replacing Fitbit). Requires sign-in and a configured OAuth client."
+        case .bluetooth:
+            return "Pairs directly with your band (Fitbit Air or any standard heart-rate band) over Bluetooth. Heart rate and heartbeats are recorded on this iPhone and every score is computed here — no account, no cloud."
         case .demo:
             return "Explore OutPerform with 30 days of sample data — no wearable required. Switching to a real source will clear all demo data."
         }
@@ -37,6 +41,7 @@ public enum DataSourceType: String, CaseIterable, Sendable, Codable {
         switch self {
         case .appleHealth:  return "heart.fill"
         case .googleHealth: return "g.circle.fill"
+        case .bluetooth:    return "dot.radiowaves.left.and.right"
         case .demo:         return "sparkles"
         }
     }
@@ -73,6 +78,15 @@ final class AppSettings {
 
     var biologicalSex: BiologicalSex {
         didSet { defaults.set(biologicalSex.rawValue, forKey: "biologicalSex") }
+    }
+
+    /// Body weight and height, used for calorie estimates (Keytel / Harris–Benedict).
+    var weightKg: Double {
+        didSet { defaults.set(weightKg, forKey: "weightKg") }
+    }
+
+    var heightCm: Double {
+        didSet { defaults.set(heightCm, forKey: "heightCm") }
     }
 
     /// Desired wake time stored as minutes-after-midnight.
@@ -129,6 +143,8 @@ final class AppSettings {
             birthDate = cal.date(byAdding: .year, value: -years, to: Date()) ?? Date()
         }
         biologicalSex = BiologicalSex(rawValue: defaults.string(forKey: "biologicalSex") ?? "") ?? .other
+        weightKg = defaults.object(forKey: "weightKg") as? Double ?? 75
+        heightCm = defaults.object(forKey: "heightCm") as? Double ?? 175
         let storedWake = defaults.object(forKey: "wakeMinuteOfDay") as? Int
         wakeMinuteOfDay = storedWake ?? (7 * 60)   // 07:00
         let storedLatency = defaults.object(forKey: "sleepLatencyMin") as? Double

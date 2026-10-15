@@ -81,6 +81,9 @@ final class ScoreEngine {
 
     func setProvider(_ p: HealthDataProvider) { provider = p }
 
+    /// Read-only access for UI-side summaries (illness watch).
+    var modelContextForReads: ModelContext { modelContext }
+
     // MARK: Date windows
 
     nonisolated private static func sleepWindow(for day: Date, now: Date) -> (Date, Date) {
@@ -198,6 +201,7 @@ final class ScoreEngine {
         // actor is NOT blocked by these while they are in flight.
         async let hr       = provider.heartRates(from: dataFetchStart, to: now)
         async let beatRR   = provider.beatToBeatRR(from: dataFetchStart, to: now)
+        async let nightRMSSD = provider.nightlyRMSSD(from: dataFetchStart, to: now)
         async let hrv      = provider.hrvSDNN(from: dataFetchStart, to: now)
         async let rhr      = provider.restingHeartRate(from: dataFetchStart, to: now)
         async let resp     = provider.respiratoryRate(from: dataFetchStart, to: now)
@@ -224,6 +228,7 @@ final class ScoreEngine {
         let sleepWeights         = config.sleepWeights
         let wakeMinuteOfDay      = settings.wakeMinuteOfDay
         let focusCalibrationOffset = settings.focusCalibrationOffset
+        let scoringModel         = config.scoringModel
 
         // ── Step 4: Collect I/O results (trivial at this point) ──────────────
         let raw = RawData(
@@ -234,6 +239,7 @@ final class ScoreEngine {
             resp:     try await resp,
             spo2:     try await spo2,
             temp:     try await temp,
+            nightlyRMSSD: try await nightRMSSD,
             sleep:    try await sleep,
             workouts: try await workouts,
             vo2:      try await vo2)
@@ -250,6 +256,7 @@ final class ScoreEngine {
             sleepWeights: sleepWeights,
             wakeMinuteOfDay: wakeMinuteOfDay,
             focusCalibrationOffset: focusCalibrationOffset,
+            scoringModel: scoringModel,
             daysBack: daysBack,
             now: now,
             fetchedDayStart: fetchWindowStart)
@@ -265,10 +272,16 @@ final class ScoreEngine {
 
             // hrMax: previously computed on main actor — moved here so raw.hr.map(\.value)
             // (potentially 10 k+ elements) never blocks the UI thread.
-            let hrMax = StrainCalculator.personalisedHRMax(
-                age: pending.age,
-                allHeartRates: pending.raw.hr.map(\.value),
-                method: StrainCalculator.HRMaxMethod(rawValue: pending.hrMaxMethodRawValue) ?? .max)
+            let hrMax: Double
+            if pending.scoringModel == .openScience {
+                // Tanaka, or the observed 99.5th percentile when higher.
+                hrMax = EffortScorer.hrMax(age: pending.age, observed: pending.raw.hr.map(\.value))
+            } else {
+                hrMax = StrainCalculator.personalisedHRMax(
+                    age: pending.age,
+                    allHeartRates: pending.raw.hr.map(\.value),
+                    method: StrainCalculator.HRMaxMethod(rawValue: pending.hrMaxMethodRawValue) ?? .max)
+            }
 
             // Calibration gate — previously done on main actor after second SwiftData fetch.
             let storedNightsHRV = pending.storedValues.filter { $0.hrv != nil }.count
@@ -291,7 +304,8 @@ final class ScoreEngine {
                 recoveryWeights: pending.recoveryWeights,
                 sleepWeights: pending.sleepWeights,
                 wakeMinuteOfDay: pending.wakeMinuteOfDay,
-                focusCalibrationOffset: pending.focusCalibrationOffset)
+                focusCalibrationOffset: pending.focusCalibrationOffset,
+                scoringModel: pending.scoringModel)
 
             return Self.computeAll(daysBack: pending.daysBack, now: pending.now, raw: pending.raw,
                                    priors: priors, calibratedOverall: calibratedOverall, ctx: ctx)
@@ -362,6 +376,7 @@ final class ScoreEngine {
 
     private struct RawData: Sendable {
         var hr, beatRR, hrv, rhr, resp, spo2, temp: [QuantitySample]
+        var nightlyRMSSD: [QuantitySample]
         var sleep: [SleepSegment]
         var workouts: [WorkoutSession]
         var vo2: [QuantitySample]
@@ -389,6 +404,7 @@ final class ScoreEngine {
         let sleepWeights: SleepCalculator.Weights
         let wakeMinuteOfDay: Int
         let focusCalibrationOffset: Double
+        let scoringModel: ScoringModel
         let daysBack: Int
         let now: Date
         let fetchedDayStart: Date
@@ -406,6 +422,8 @@ final class ScoreEngine {
         var sleepWeights: SleepCalculator.Weights
         var wakeMinuteOfDay: Int
         var focusCalibrationOffset: Double
+        var scoringModel: ScoringModel
+        var openScience: Bool { scoringModel == .openScience }
     }
 
     /// Plain value-type mirror of a `DailyRecord`'s computed fields. The whole
@@ -542,6 +560,9 @@ final class ScoreEngine {
         // aggregates timestamped anywhere from midnight to end-of-day. Widening to
         // sStart..dEnd (prev 18:00 → current midnight) ensures we don't drop a
         // summary that lands after the 14:00 sleep-window cutoff.
+        // A source that analysed the night's beats itself (Bluetooth band)
+        // supplies a windowed RMSSD; prefer it over the whole-window value.
+        if let nightly = lastValue(raw.nightlyRMSSD, sStart, dEnd) { record.rmssd = nightly }
         if let providedHRV = mean(raw.hrv, sStart, dEnd) { record.sdnn = providedHRV }
         record.hrv = record.rmssd ?? record.sdnn ?? record.hrv
 
@@ -566,7 +587,14 @@ final class ScoreEngine {
 
         // --- Strain (only recompute when we actually have heart-rate today) ---
         let dayHR = raw.hr.filter { $0.start >= dStart && $0.start <= dEnd }
-        if !dayHR.isEmpty {
+        // Resting HR for %HRR: tonight's sleeping floor, else the day's 10th pct.
+        let effortRHR = record.restingHR ?? (dayHR.isEmpty ? nil : Stats.percentile(dayHR.map(\.value), 0.10))
+        if ctx.openScience {
+            if let rhr = effortRHR, let t = EffortScorer.trimp(dayHR, restingHR: rhr, hrMax: hrMax) {
+                record.dayTRIMP = t
+                record.dayStrain = EffortScorer.strain21(trimp: t)
+            }
+        } else if !dayHR.isEmpty {
             let dayTRIMP = StrainCalculator.trimp(heartRates: dayHR, hrMax: hrMax)
             record.dayTRIMP = dayTRIMP
             record.dayStrain = StrainCalculator.strain(fromTRIMP: dayTRIMP,
@@ -580,12 +608,20 @@ final class ScoreEngine {
             let workoutHR = w.heartRates.isEmpty
                 ? raw.hr.filter { $0.start >= w.start && $0.start <= w.end }
                 : w.heartRates
-            let t = StrainCalculator.trimp(heartRates: workoutHR, hrMax: hrMax)
-            activityTRIMP += StrainCalculator.adjustedTRIMP(t, activity: w.activity)
+            if ctx.openScience {
+                if let rhr = effortRHR {
+                    activityTRIMP += EffortScorer.trimp(workoutHR, restingHR: rhr, hrMax: hrMax) ?? 0
+                }
+            } else {
+                let t = StrainCalculator.trimp(heartRates: workoutHR, hrMax: hrMax)
+                activityTRIMP += StrainCalculator.adjustedTRIMP(t, activity: w.activity)
+            }
         }
         if activityTRIMP > 0 {
-            record.activityStrain = StrainCalculator.strain(fromTRIMP: activityTRIMP,
-                                      scale: ctx.strainScale, coefficient: ctx.strainCoefficient)
+            record.activityStrain = ctx.openScience
+                ? EffortScorer.strain21(trimp: activityTRIMP)
+                : StrainCalculator.strain(fromTRIMP: activityTRIMP,
+                                          scale: ctx.strainScale, coefficient: ctx.strainCoefficient)
         }
 
         // --- VO2 max ---
@@ -612,21 +648,34 @@ final class ScoreEngine {
             baseline = ctx.defaultSleepNeedMin
         }
         let napMinutes = 0.0
-        let pastNightNeed = SleepNeedCalculator.sleepNeed(baselineMinutes: baseline,
-                                                          yesterdayStrain: yesterdayStrain,
-                                                          carriedDebt: carriedDebt,
-                                                          napMinutes: napMinutes)
-        if sm.totalSleepMin > 0 {
-            carriedDebt = SleepNeedCalculator.updatedDebt(previousDebt: carriedDebt,
-                                                          previousNeed: pastNightNeed.needMinutes,
-                                                          previousActual: sm.totalSleepMin)
+        let pastNightNeedMin: Double
+        if ctx.openScience {
+            // Need = personal base + carried debt; 55% of the shortfall carries on.
+            pastNightNeedMin = baseline + carriedDebt
+            if sm.totalSleepMin > 0 {
+                carriedDebt = SleepDebtModel.nextDebt(baseNeedMin: baseline, currentDebtMin: carriedDebt,
+                                                      sleptMin: sm.totalSleepMin)
+            }
+            record.sleepDebtMin = carriedDebt
+            record.sleepNeedMin = baseline + carriedDebt
+        } else {
+            let pastNightNeed = SleepNeedCalculator.sleepNeed(baselineMinutes: baseline,
+                                                              yesterdayStrain: yesterdayStrain,
+                                                              carriedDebt: carriedDebt,
+                                                              napMinutes: napMinutes)
+            pastNightNeedMin = pastNightNeed.needMinutes
+            if sm.totalSleepMin > 0 {
+                carriedDebt = SleepNeedCalculator.updatedDebt(previousDebt: carriedDebt,
+                                                              previousNeed: pastNightNeed.needMinutes,
+                                                              previousActual: sm.totalSleepMin)
+            }
+            record.sleepDebtMin = carriedDebt
+            let tonightNeed = SleepNeedCalculator.sleepNeed(baselineMinutes: baseline,
+                                                            yesterdayStrain: record.dayStrain ?? 0,
+                                                            carriedDebt: carriedDebt,
+                                                            napMinutes: napMinutes)
+            record.sleepNeedMin = tonightNeed.needMinutes
         }
-        record.sleepDebtMin = carriedDebt
-        let tonightNeed = SleepNeedCalculator.sleepNeed(baselineMinutes: baseline,
-                                                        yesterdayStrain: record.dayStrain ?? 0,
-                                                        carriedDebt: carriedDebt,
-                                                        napMinutes: napMinutes)
-        record.sleepNeedMin = tonightNeed.needMinutes
 
         // --- Sleep performance ---
         let bedtimes = (history.suffix(7) + [record]).compactMap { $0.sleepOnset }.map { onset -> Double in
@@ -636,9 +685,14 @@ final class ScoreEngine {
         }
         let bedtimeStd = Stats.stdDev(bedtimes)
         if sm.totalSleepMin > 0 {
-            let perf = SleepCalculator.performance(metrics: sm, sleepNeedMin: pastNightNeed.needMinutes,
-                                                   bedtimeStdHours: bedtimeStd, weights: ctx.sleepWeights)
-            record.sleepPerformance = perf.score
+            if ctx.openScience {
+                record.sleepPerformance = RestScorer.score(metrics: sm, needMin: pastNightNeedMin,
+                                                           bedtimeStdHours: bedtimeStd)
+            } else {
+                let perf = SleepCalculator.performance(metrics: sm, sleepNeedMin: pastNightNeedMin,
+                                                       bedtimeStdHours: bedtimeStd, weights: ctx.sleepWeights)
+                record.sleepPerformance = perf.score
+            }
         }
 
         // --- Recovery (needs baselines from prior nights) ---
@@ -658,7 +712,20 @@ final class ScoreEngine {
         let baselineReady = calibratedOverall
             || Swift.min(nightsHRV, nightsRHR) >= Self.calibrationNights
 
-        if baselineReady, record.hrv != nil {
+        if ctx.openScience {
+            // Charge: z vs winsorised-EWMA baselines folded over prior nights.
+            // Usable after 4 nights (Calibrating until then).
+            let charge = ChargeScorer.Input(
+                hrv: record.hrv, restingHR: record.restingHR,
+                sleepPerformance: record.sleepPerformance,
+                respiratoryRate: record.respiratoryRate,
+                skinTempC: record.skinTempC, spo2Avg: record.spo2Avg,
+                hrvBaseline: Baselines.fold(history.compactMap(\.hrv), cfg: Baselines.hrv),
+                rhrBaseline: Baselines.fold(history.compactMap(\.restingHR), cfg: Baselines.restingHR),
+                respBaseline: Baselines.fold(history.compactMap(\.respiratoryRate), cfg: Baselines.resp),
+                tempBaseline: Baselines.fold(history.compactMap(\.skinTempC), cfg: Baselines.skinTemp))
+            if let c = ChargeScorer.score(charge) { record.recovery = c.score }
+        } else if baselineReady, record.hrv != nil {
             record.recovery = RecoveryCalculator.compute(recInput, weights: ctx.recoveryWeights).score
         }
 

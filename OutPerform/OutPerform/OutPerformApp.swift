@@ -44,7 +44,10 @@ struct OutPerformApp: App {
         .onChange(of: scenePhase) { _, phase in
             // Re-arm background sync each time we leave the foreground, so the
             // system always has a fresh pending request to run while we're away.
-            if phase == .background { BackgroundManager.shared.schedule() }
+            if phase == .background {
+                BackgroundManager.shared.schedule()
+                BandManager.shared.flush()
+            }
         }
     }
 }

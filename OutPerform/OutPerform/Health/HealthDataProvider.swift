@@ -45,6 +45,10 @@ protocol HealthDataProvider: AnyObject {
     /// Watch records these (via the heartbeat series); other sources return [].
     func beatToBeatRR(from: Date, to: Date) async throws -> [QuantitySample]
     func hrvSDNN(from: Date, to: Date) async throws -> [QuantitySample]
+    /// A finished per-night RMSSD (ms), stamped at wake time. Sources that
+    /// analyse beats themselves (the Bluetooth band) supply this; the engine
+    /// then prefers it over its own whole-window RMSSD.
+    func nightlyRMSSD(from: Date, to: Date) async throws -> [QuantitySample]
     func restingHeartRate(from: Date, to: Date) async throws -> [QuantitySample]
     func respiratoryRate(from: Date, to: Date) async throws -> [QuantitySample]
     func oxygenSaturation(from: Date, to: Date) async throws -> [QuantitySample]
@@ -57,4 +61,5 @@ protocol HealthDataProvider: AnyObject {
 extension HealthDataProvider {
     func isAvailable() -> Bool { true }
     func beatToBeatRR(from: Date, to: Date) async throws -> [QuantitySample] { [] }
+    func nightlyRMSSD(from: Date, to: Date) async throws -> [QuantitySample] { [] }
 }

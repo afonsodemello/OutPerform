@@ -49,6 +49,10 @@ struct TodayView: View {
                         .padding(12)
                         .background(.background.secondary, in: RoundedRectangle(cornerRadius: 14))
                     }
+                    if settings.dataSource == .bluetooth { LiveBandCard() }
+                    if let illness = appModel.illnessSignal() {
+                        banner("Early-warning", illness.message, .opRed)
+                    }
                     calibrationBanner
                     if let today = anyLatest {
                         // Recovery/Readiness come from your last full night. If
@@ -121,6 +125,24 @@ struct TodayView: View {
     private var usableDays: Int { records.filter { $0.hrv != nil && $0.restingHR != nil }.count }
 
     @ViewBuilder private var calibrationBanner: some View {
+        if AlgorithmConfig.shared.scoringModel == .openScience {
+            // Open-science Charge unlocks after 4 nights and is "Building" to 14.
+            let nights = records.filter { $0.hrv != nil }.count
+            switch nights {
+            case ..<BaselineState.minNightsSeed:
+                banner("Calibrating — \(nights) of \(BaselineState.minNightsSeed) nights",
+                       "Wear your band to sleep. Charge appears once your HRV baseline has \(BaselineState.minNightsSeed) nights.", .opYellow)
+            case ..<BaselineState.minNightsTrust:
+                banner("Building baselines", "Scores are live but still learning you (\(nights)/\(BaselineState.minNightsTrust) nights).", .opYellow)
+            default:
+                EmptyView()
+            }
+        } else {
+            classicCalibrationBanner
+        }
+    }
+
+    @ViewBuilder private var classicCalibrationBanner: some View {
         switch usableDays {
         case ..<7:
             banner("Calibrating — \(usableDays) of 14 days", "Baselines need ~14 nights of data. Scores are provisional until then.", .opYellow)

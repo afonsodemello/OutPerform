@@ -16,6 +16,11 @@ final class AlgorithmConfig {
     private let defaults = UserDefaults.standard
     private let key = "algorithmConfig.v1"
 
+    // MARK: Scoring model
+    /// Which formulas compute recovery, strain, sleep performance and sleep
+    /// debt. The Bluetooth source switches this to the open-science model.
+    var scoringModel: ScoringModel = .outperform
+
     // MARK: Recovery weights
     var wHRV = 0.40
     var wRHR = 0.25
@@ -67,6 +72,7 @@ final class AlgorithmConfig {
         var spEfficiency, spRestorative, spFulfillment, spConsistency: Double
         var hrMaxMethod: HRMaxMethod
         var strainScale, strainCoefficient, defaultSleepNeedMin: Double
+        var scoringModel: ScoringModel?
     }
 
     init() { load() }
@@ -77,7 +83,8 @@ final class AlgorithmConfig {
                             spEfficiency: spEfficiency, spRestorative: spRestorative,
                             spFulfillment: spFulfillment, spConsistency: spConsistency,
                             hrMaxMethod: hrMaxMethod, strainScale: strainScale,
-                            strainCoefficient: strainCoefficient, defaultSleepNeedMin: defaultSleepNeedMin)
+                            strainCoefficient: strainCoefficient, defaultSleepNeedMin: defaultSleepNeedMin,
+                            scoringModel: scoringModel)
         if let data = try? JSONEncoder().encode(snap) { defaults.set(data, forKey: key) }
     }
 
@@ -90,6 +97,7 @@ final class AlgorithmConfig {
         spFulfillment = s.spFulfillment; spConsistency = s.spConsistency
         hrMaxMethod = s.hrMaxMethod; strainScale = s.strainScale
         strainCoefficient = s.strainCoefficient; defaultSleepNeedMin = s.defaultSleepNeedMin
+        scoringModel = s.scoringModel ?? .outperform
     }
 
     func resetToDefaults() {

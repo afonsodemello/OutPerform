@@ -38,6 +38,14 @@ struct SettingsView: View {
                         ForEach(DataSourceType.allCases, id: \.self) { Text($0.displayName).tag($0) }
                     }
                     Text(settings.dataSource.detail).font(.caption).foregroundStyle(.secondary)
+                    if settings.dataSource == .bluetooth {
+                        NavigationLink {
+                            BandView()
+                        } label: {
+                            Label(BandManager.shared.pairedName ?? "Pair your band",
+                                  systemImage: "dot.radiowaves.left.and.right")
+                        }
+                    }
                     if settings.dataSource == .googleHealth {
                         Button {
                             showGoogleConnect = true
@@ -56,6 +64,12 @@ struct SettingsView: View {
                     LabeledContent("Age", value: "\(settings.age)")
                     Picker("Biological sex", selection: $settings.biologicalSex) {
                         ForEach(BiologicalSex.allCases, id: \.self) { Text($0.displayName).tag($0) }
+                    }
+                    Stepper(value: $settings.weightKg, in: 30...250, step: 1) {
+                        LabeledContent("Weight", value: "\(Int(settings.weightKg)) kg")
+                    }
+                    Stepper(value: $settings.heightCm, in: 120...230, step: 1) {
+                        LabeledContent("Height", value: "\(Int(settings.heightCm)) cm")
                     }
                 }
 

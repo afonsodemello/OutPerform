@@ -61,12 +61,52 @@ Note: the `dataPoints` value field names aren't fully specified in the migration
 docs, so the JSON parser is deliberately schema-resilient (it digs out the first
 numeric/stage value). Verify against a live account and tighten if needed.
 
+## Bluetooth band (offline, no cloud)
+
+The **Bluetooth band** source pairs directly with your band and records on the
+iPhone itself, with no account and no cloud:
+
+- **Link:** the standard Bluetooth Heart Rate profile (service `0x180D`,
+  measurement `0x2A37`, plus Battery `0x180F` and Device Info `0x180A`). It
+  works with a **Fitbit Air** (Google Health app → device → *Share heart rate*,
+  and *Always visible* for background recording) and any chest strap or band
+  that broadcasts standard heart rate.
+- **Recording:** `Bluetooth/BandManager.swift` keeps a pending connection open,
+  auto-reconnects when the band comes back in range, runs in the background
+  (`bluetooth-central`) and is relaunched by iOS state restoration. Every HR
+  reading and every beat-to-beat interval is written to compact daily binary
+  files (`Bluetooth/StreamStore.swift`, Application Support/Streams). Data is
+  only recorded while the phone is in range: the band's own history syncs only
+  through Google's cloud, which this source deliberately doesn't use.
+- **Analysis** (`Algorithms/Band/`, all on-device):
+  - sleep detection from the overnight HR drop, plus a 30-second
+    wake/light/deep/REM hypnogram from HR, Walch difference-of-Gaussians HR
+    variability, RMSSD and breathing variability (`HRSleepAnalyzer`);
+  - HRV as the mean of 5-minute RMSSD windows, with range + Malik ectopic
+    cleaning (`BeatHRV`);
+  - resting HR as the lowest 5-minute bin mean while asleep;
+  - breathing rate from respiratory sinus arrhythmia in the beats
+    (`RespirationFromBeats`);
+  - retroactive workout detection with Keytel calories (`HRWorkoutDetector`).
+- **Scoring:** the band uses the **open-science model**
+  (`Algorithms/Band/OpenScienceScoring.swift`): HRV-led Charge vs
+  winsorised-EWMA baselines, Edwards %HRR TRIMP strain on a log curve, the Rest
+  composite, 55% sleep-debt carry-over, and a 2-signal illness early-warning.
+  These follow the methods the [NOOP](https://github.com/ryanbr/noop) project
+  documents. They're an independent implementation; no NOOP source code is
+  included. You can switch models in Settings → Advanced.
+
+Without an accelerometer channel, sleep/wake rests on heart rate alone and
+staging is approximate. Blood oxygen and skin temperature aren't part of the
+open heart-rate profile.
+
 ## Architecture
 
 ```
 Models/        CoreTypes (samples, stages, zones), DailyRecord (SwiftData), AppSettings
 Algorithms/    Pure, dependency-free score maths (unit-testable with `swiftc`)
-Health/        Provider protocol + HealthKit / Google Health backends + Keychain
+Health/        Provider protocol + HealthKit / Google Health / Bluetooth band backends + Keychain
+Bluetooth/     CoreBluetooth band client, HR packet decoder, on-device stream store
 Engine/        ScoreEngine (orchestration), Background & Notification managers
 Views/         SwiftUI screens (Today, Sleep, Strain, Body, Trends, Settings, Onboarding)
 App/           AppModel coordinator

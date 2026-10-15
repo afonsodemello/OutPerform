@@ -20,8 +20,11 @@
 			</array>
 		</dict>
 	</array>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>OutPerform connects directly to your band over Bluetooth to record heart rate and heartbeats on this iPhone. Nothing is sent to the cloud.</string>
 	<key>UIBackgroundModes</key>
 	<array>
+		<string>bluetooth-central</string>
 		<string>fetch</string>
 		<string>processing</string>
 	</array>

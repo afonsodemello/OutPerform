@@ -23,6 +23,15 @@ struct AdvancedSettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
 
+            // MARK: Scoring model
+            Section {
+                Picker("Scoring model", selection: $config.scoringModel) {
+                    ForEach(ScoringModel.allCases, id: \.self) { Text($0.displayName).tag($0) }
+                }.onChange(of: config.scoringModel) { _,_ in dirty = true }
+            } footer: {
+                Text("Open-science: HRV-led Charge vs winsorised-EWMA baselines, Edwards %HRR TRIMP strain, Rest composite and 55% sleep-debt carry-over. The weights below apply to the classic model only.")
+            }
+
             // MARK: Recovery weights
             Section("Recovery weights") {
                 weightSlider("HRV", $config.wHRV)

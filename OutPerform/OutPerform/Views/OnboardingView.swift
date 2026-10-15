@@ -19,6 +19,7 @@ struct OnboardingView: View {
     @State private var authorizing = false
     @State private var authError: String?
     @State private var showGoogleConnect = false
+    @State private var showBandPairing = false
 
     static let oldestBirthDate = Calendar.current.date(byAdding: .year, value: -120, to: Date()) ?? Date.distantPast
 
@@ -129,6 +130,14 @@ struct OnboardingView: View {
         .sheet(isPresented: $showGoogleConnect) {
             GoogleConnectView(onConnected: { settings.hasOnboarded = true })
         }
+        .sheet(isPresented: $showBandPairing) {
+            NavigationStack {
+                BandView(onDone: {
+                    settings.hasOnboarded = true
+                    Task { await appModel.refresh() }
+                })
+            }
+        }
     }
 
     private func saveProfile() {
@@ -144,6 +153,12 @@ struct OnboardingView: View {
         if selectedSource == .googleHealth {
             appModel.switchSource(to: .googleHealth)
             showGoogleConnect = true
+            return
+        }
+        // Bluetooth: switch (starts the radio + permission prompt), then pair.
+        if selectedSource == .bluetooth {
+            appModel.switchSource(to: .bluetooth)
+            showBandPairing = true
             return
         }
         // Demo needs no authorization — just switch and sync.

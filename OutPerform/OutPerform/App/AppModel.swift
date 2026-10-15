@@ -21,12 +21,25 @@ final class AppModel {
         self.settings = settings
         let provider = AppModel.makeProvider(for: settings.dataSource)
         self.engine = ScoreEngine(provider: provider, settings: settings, modelContext: modelContext)
+        configureBand()
+    }
+
+    /// Start the Bluetooth link when the band is the source (or one is paired),
+    /// and re-score from the stored streams every 15 minutes of live data.
+    private func configureBand() {
+        let band = BandManager.shared
+        band.onScoringTick = { [weak self] in
+            guard let self, self.settings.dataSource == .bluetooth else { return }
+            Task { await self.refresh() }
+        }
+        if settings.dataSource == .bluetooth || band.isPaired { band.start() }
     }
 
     static func makeProvider(for type: DataSourceType) -> HealthDataProvider {
         switch type {
         case .appleHealth:  return HealthKitProvider()
         case .googleHealth: return GoogleHealthProvider()
+        case .bluetooth:    return BandDataProvider()
         case .demo:         return DemoDataProvider()
         }
     }
@@ -38,6 +51,15 @@ final class AppModel {
         let previousSource = settings.dataSource
         let needsReset = previousSource == .demo || type == .demo
         settings.dataSource = type
+        // The band is scored with the open-science (NOOP-method) model; the
+        // other sources keep OutPerform's classic formulas.
+        let config = AlgorithmConfig.shared
+        let model: ScoringModel = type == .bluetooth ? .openScience : .outperform
+        if config.scoringModel != model {
+            config.scoringModel = model
+            config.save()
+        }
+        if type == .bluetooth { BandManager.shared.start() }
         if needsReset {
             engine.deleteAllData()
             WidgetBridge.publish(readiness: nil, recovery: nil, strain: nil,
@@ -115,6 +137,18 @@ final class AppModel {
             await refresh(); return
         }
         if Date().timeIntervalSince(last) > seconds { await refresh() }
+    }
+
+    /// Early-illness nudge: two or more of RHR↑ / HRV↓ / temp↑ / resp↑ over the
+    /// last 2 days vs a ~28-day baseline. Nil when nothing fires.
+    func illnessSignal() -> IllnessSignal? {
+        var descriptor = FetchDescriptor<DailyRecord>(sortBy: [SortDescriptor(\.date, order: .reverse)])
+        descriptor.fetchLimit = 31
+        guard let records = try? engine.modelContextForReads.fetch(descriptor) else { return nil }
+        let days = records.reversed().map {
+            IllnessWatch.Day(restingHR: $0.restingHR, hrv: $0.hrv, skinTempC: $0.skinTempC, resp: $0.respiratoryRate)
+        }
+        return IllnessWatch.evaluate(Array(days))
     }
 
     /// Wipe all stored data and clear the widgets.
