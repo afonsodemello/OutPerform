@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct SleepMetrics: Sendable {
+nonisolated public struct SleepMetrics: Sendable {
     public var totalSleepMin: Double
     public var timeInBedMin: Double
     public var remMin: Double
@@ -23,7 +23,7 @@ public struct SleepMetrics: Sendable {
     public var wake: Date?
 }
 
-public struct SleepPerformance: Sendable {
+nonisolated public struct SleepPerformance: Sendable {
     public var score: Double              // 0–100
     public var efficiencyScore: Double
     public var restorativeScore: Double
@@ -31,7 +31,7 @@ public struct SleepPerformance: Sendable {
     public var consistencyScore: Double
 }
 
-public enum SleepCalculator {
+nonisolated public enum SleepCalculator {
 
     /// Tunable sleep-performance weights (Settings → Advanced).
     public struct Weights: Sendable {

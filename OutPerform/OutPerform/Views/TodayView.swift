@@ -125,16 +125,21 @@ struct TodayView: View {
     /// Days of usable data — counts historical nights too, so a user with months
     /// of history is fully calibrated immediately. Mirrors the engine gate, which
     /// needs BOTH HRV and resting HR, so the "n/14" matches what actually unlocks.
-    private var usableDays: Int { records.filter { $0.hrv != nil && $0.restingHR != nil }.count }
+    private var usableDays: Int {
+        // Open-science Charge runs on HRV or, failing that, resting HR.
+        AlgorithmConfig.shared.scoringModel == .openScience
+            ? records.filter { $0.hrv != nil || $0.restingHR != nil }.count
+            : records.filter { $0.hrv != nil && $0.restingHR != nil }.count
+    }
 
     @ViewBuilder private var calibrationBanner: some View {
         if AlgorithmConfig.shared.scoringModel == .openScience {
             // Open-science Charge unlocks after 4 nights and is "Building" to 14.
-            let nights = records.filter { $0.hrv != nil }.count
+            let nights = usableDays
             switch nights {
             case ..<BaselineState.minNightsSeed:
                 banner("Calibrating — \(nights) of \(BaselineState.minNightsSeed) nights",
-                       "Wear your band to sleep. Charge appears once your HRV baseline has \(BaselineState.minNightsSeed) nights.", .opYellow)
+                       "Recovery appears once there are \(BaselineState.minNightsSeed) nights of HRV or resting heart rate.", .opYellow)
             case ..<BaselineState.minNightsTrust:
                 banner("Building baselines", "Scores are live but still learning you (\(nights)/\(BaselineState.minNightsTrust) nights).", .opYellow)
             default:

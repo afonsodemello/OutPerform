@@ -8,7 +8,7 @@
 
 import Foundation
 
-public enum VitalMetric: String, Sendable, CaseIterable, Identifiable {
+nonisolated public enum VitalMetric: String, Sendable, CaseIterable, Identifiable {
     case heartRate, hrv, respiratoryRate, spo2, skinTemp
     public var id: String { rawValue }
     public var displayName: String {
@@ -24,7 +24,7 @@ public enum VitalMetric: String, Sendable, CaseIterable, Identifiable {
     public var elevationIsConcerning: Bool { self != .hrv }
 }
 
-public struct Baseline: Sendable {
+nonisolated public struct Baseline: Sendable {
     public var mean: Double
     public var std: Double
     public var alertHigh: Double { mean + 2 * std }
@@ -38,9 +38,9 @@ public struct Baseline: Sendable {
     }
 }
 
-public enum AlertLevel: String, Sendable { case normal, yellow, red }
+nonisolated public enum AlertLevel: String, Sendable { case normal, yellow, red }
 
-public struct VitalStatus: Sendable, Identifiable {
+nonisolated public struct VitalStatus: Sendable, Identifiable {
     public var metric: VitalMetric
     public var value: Double
     public var baseline: Baseline
@@ -49,7 +49,7 @@ public struct VitalStatus: Sendable, Identifiable {
     public var id: String { metric.rawValue }
 }
 
-public enum HealthMonitor {
+nonisolated public enum HealthMonitor {
 
     /// Classify today's value against a baseline band.
     public static func status(metric: VitalMetric, value: Double, baseline: Baseline) -> VitalStatus {

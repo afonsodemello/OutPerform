@@ -13,7 +13,7 @@ import Foundation
 
 /// A single numeric sample over a time interval (HR bpm, HRV ms, SpO2 fraction, °C, …).
 /// The `value` is always expressed in the canonical unit documented at the call site.
-public struct QuantitySample: Sendable, Hashable {
+nonisolated public struct QuantitySample: Sendable, Hashable {
     public var start: Date
     public var end: Date
     public var value: Double
@@ -36,7 +36,7 @@ public struct QuantitySample: Sendable, Hashable {
 
 // MARK: - Sleep
 
-public enum SleepStage: String, Sendable, Codable, CaseIterable {
+nonisolated public enum SleepStage: String, Sendable, Codable, CaseIterable {
     case inBed
     case awake
     case core          // Light / N1-N2
@@ -56,7 +56,7 @@ public enum SleepStage: String, Sendable, Codable, CaseIterable {
     public var isRestorative: Bool { self == .rem || self == .deep }
 }
 
-public struct SleepSegment: Sendable, Hashable {
+nonisolated public struct SleepSegment: Sendable, Hashable {
     public var start: Date
     public var end: Date
     public var stage: SleepStage
@@ -73,7 +73,7 @@ public struct SleepSegment: Sendable, Hashable {
 // MARK: - Workouts
 
 /// Activity types we care about for the muscular-load multiplier.
-public enum WorkoutActivity: String, Sendable, Codable, CaseIterable {
+nonisolated public enum WorkoutActivity: String, Sendable, Codable, CaseIterable {
     case weightlifting
     case hiit
     case yoga
@@ -106,7 +106,7 @@ public enum WorkoutActivity: String, Sendable, Codable, CaseIterable {
     }
 }
 
-public struct WorkoutSession: Sendable, Hashable {
+nonisolated public struct WorkoutSession: Sendable, Hashable {
     public var start: Date
     public var end: Date
     public var activity: WorkoutActivity
@@ -127,7 +127,7 @@ public struct WorkoutSession: Sendable, Hashable {
 
 // MARK: - Biological sex
 
-public enum BiologicalSex: String, Sendable, Codable, CaseIterable {
+nonisolated public enum BiologicalSex: String, Sendable, Codable, CaseIterable {
     case male
     case female
     case other
@@ -143,7 +143,7 @@ public enum BiologicalSex: String, Sendable, Codable, CaseIterable {
 
 // MARK: - Score zones
 
-public enum RecoveryZone: String, Sendable {
+nonisolated public enum RecoveryZone: String, Sendable {
     case red, yellow, green
 
     public nonisolated init(score: Double) {
@@ -163,7 +163,7 @@ public enum RecoveryZone: String, Sendable {
     }
 }
 
-public enum StrainZone: String, Sendable {
+nonisolated public enum StrainZone: String, Sendable {
     case light, moderate, high, allOut
 
     public nonisolated init(strain: Double) {
@@ -185,7 +185,7 @@ public enum StrainZone: String, Sendable {
     }
 }
 
-public enum ACWRZone: String, Sendable {
+nonisolated public enum ACWRZone: String, Sendable {
     case undertraining, sweetSpot, caution, highRisk
 
     public nonisolated init(ratio: Double) {
@@ -207,7 +207,7 @@ public enum ACWRZone: String, Sendable {
     }
 }
 
-public enum Chronotype: String, Sendable, Codable {
+nonisolated public enum Chronotype: String, Sendable, Codable {
     case earlyBird, neutral, nightOwl
 
     public var displayName: String {
@@ -219,7 +219,7 @@ public enum Chronotype: String, Sendable, Codable {
     }
 }
 
-public enum ApneaRisk: String, Sendable {
+nonisolated public enum ApneaRisk: String, Sendable {
     case normal, mild, moderate, severe
 
     public nonisolated init(odi: Double) {

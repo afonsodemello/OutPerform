@@ -8,7 +8,7 @@
 
 import Foundation
 
-public enum StrainCalculator {
+nonisolated public enum StrainCalculator {
 
     // MARK: Max heart rate
 

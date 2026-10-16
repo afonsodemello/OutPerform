@@ -26,7 +26,7 @@ final class ScoreEngine {
     private let config = AlgorithmConfig.shared
 
     /// Nights of baseline data required before baseline-dependent scores unlock.
-    static let calibrationNights = 14
+    nonisolated static let calibrationNights = 14
     private let modelContext: ModelContext
 
     var isRefreshing = false
@@ -72,6 +72,31 @@ final class ScoreEngine {
     /// The single in-flight refresh. Owned here (unstructured Task) so a scroll
     /// gesture / view update can never cancel a sync mid-way.
     private var refreshTask: Task<Void, Never>?
+
+    /// Serializes the fetch/compute/persist bodies of refresh(), fetchRaw(), and
+    /// applyPending() against EACH OTHER (refreshTask above only dedups refresh()
+    /// against itself). Without this, a background auto-refresh (BackgroundManager
+    /// or AppModel.refreshIfStale) can interleave its SwiftData writes with a
+    /// foreground fetch+apply cycle: both independently decide the same day needs
+    /// a new DailyRecord and insert it twice. The next apply's `existingByDate`
+    /// dictionary build then crashes on the duplicate key — this was the recurring
+    /// "app crashes after Apply" bug.
+    ///
+    /// Implemented as a serial chain: each body waits on the previous tail. (An
+    /// earlier `while let existing = syncLock { await existing.value }` version
+    /// could let two waiters both enter after a release, or spin on an already
+    /// finished task without ever yielding the main actor — a hard UI freeze.)
+    private var syncTail: Task<Void, Never>?
+
+    private func withSyncLock(_ body: @escaping () async -> Void) async {
+        let previous = syncTail
+        let task = Task {
+            await previous?.value
+            await body()
+        }
+        syncTail = task
+        await task.value
+    }
 
     init(provider: HealthDataProvider, settings: AppSettings, modelContext: ModelContext) {
         self.provider = provider
@@ -128,11 +153,14 @@ final class ScoreEngine {
         lastError = nil
         lastRefreshAttempt = Date()
         defer { isFetchingRaw = false }
-        do {
-            pendingSync = try await fetchRawInternal(daysBack: daysBack)
-            hasPendingData = true
-        } catch {
-            lastError = error.localizedDescription
+        await withSyncLock { [weak self] in
+            guard let self else { return }
+            do {
+                self.pendingSync = try await self.fetchRawInternal(daysBack: daysBack)
+                self.hasPendingData = true
+            } catch {
+                self.lastError = error.localizedDescription
+            }
         }
     }
 
@@ -144,10 +172,13 @@ final class ScoreEngine {
         pendingSync = nil
         hasPendingData = false
         defer { isRefreshing = false }
-        do {
-            try await applyInternal(pending)
-        } catch {
-            lastError = error.localizedDescription
+        await withSyncLock { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.applyInternal(pending)
+            } catch {
+                self.lastError = error.localizedDescription
+            }
         }
     }
 
@@ -158,11 +189,14 @@ final class ScoreEngine {
         lastError = nil
         lastRefreshAttempt = Date()
         defer { isRefreshing = false }
-        do {
-            let pending = try await fetchRawInternal(daysBack: daysBack)
-            try await applyInternal(pending)
-        } catch {
-            lastError = error.localizedDescription
+        await withSyncLock { [weak self] in
+            guard let self else { return }
+            do {
+                let pending = try await self.fetchRawInternal(daysBack: daysBack)
+                try await self.applyInternal(pending)
+            } catch {
+                self.lastError = error.localizedDescription
+            }
         }
     }
 
@@ -315,10 +349,23 @@ final class ScoreEngine {
         // ONE bulk fetch to build the existing-record map — replaces the 31
         // individual per-day queries that upsertRecord used to fire in a loop.
         let allExisting = (try? modelContext.fetch(FetchDescriptor<DailyRecord>())) ?? []
-        var existingByDate = Dictionary(
-            uniqueKeysWithValues: allExisting.map {
-                (Calendar.current.startOfDay(for: $0.date), $0)
-            })
+        // Built defensively (not via Dictionary(uniqueKeysWithValues:), which
+        // CRASHES on a duplicate key) in case two DailyRecord rows already exist
+        // for the same day — e.g. left over from a race before the sync lock
+        // above existed. Self-heals by deleting the loser so future applies
+        // (and this dictionary build) never crash on it again.
+        var existingByDate: [Date: DailyRecord] = [:]
+        existingByDate.reserveCapacity(allExisting.count)
+        for record in allExisting {
+            let sod = Calendar.current.startOfDay(for: record.date)
+            if let dupe = existingByDate[sod] {
+                let keep = (record.dayStrain != nil || record.hrv != nil) ? record : dupe
+                modelContext.delete(keep === record ? dupe : record)
+                existingByDate[sod] = keep
+            } else {
+                existingByDate[sod] = record
+            }
+        }
         for dv in computed {
             let sod = Calendar.current.startOfDay(for: dv.date)
             let record: DailyRecord
@@ -430,7 +477,7 @@ final class ScoreEngine {
     /// chronological pass runs on these OFF the main actor; results are then copied
     /// back into the SwiftData models in one pass on the main actor. `feltGood` is
     /// deliberately absent — it's a user check-in the engine must never overwrite.
-    private struct DayValues: Sendable, FocusDaySource {
+    nonisolated private struct DayValues: Sendable, FocusDaySource {
         var date: Date
 
         var rmssd, sdnn, hrv, dfaAlpha1: Double?
@@ -446,7 +493,7 @@ final class ScoreEngine {
         var recovery, sleepPerformance, stress, readiness, vo2Max: Double?
         var sleepNeedMin, sleepDebtMin, odi, cognitiveReadiness: Double?
 
-        init(date: Date) { self.date = date }
+        nonisolated init(date: Date) { self.date = date }
 
         /// Seed from an existing persisted record (preserves values a refresh
         /// shouldn't blank out when the new fetch has no data for that field).

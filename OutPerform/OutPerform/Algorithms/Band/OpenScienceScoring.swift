@@ -131,10 +131,21 @@ nonisolated public enum ChargeScorer {
         public var tempBaseline: BaselineState?
     }
 
-    /// nil while the HRV baseline is still calibrating.
+    /// HRV-led when HRV and its baseline exist. On a night with no HRV from
+    /// any source, falls back to resting HR (+ sleep, breathing, temp) against
+    /// its own baseline, capped at "Building" confidence, so a source without
+    /// HRV still gets a recovery score. nil while baselines are calibrating.
     public static func score(_ i: Input) -> (score: Double, confidence: ScoreConfidence)? {
-        guard let hrv = i.hrv, let hb = i.hrvBaseline, hb.usable else { return nil }
-        var terms: [(w: Double, z: Double)] = [(wHRV, Baselines.z(hrv, hb))]
+        var terms: [(w: Double, z: Double)] = []
+        let confidence: ScoreConfidence
+        if let hrv = i.hrv, let hb = i.hrvBaseline, hb.usable {
+            terms.append((wHRV, Baselines.z(hrv, hb)))
+            confidence = hb.confidence
+        } else if i.restingHR != nil, let rb = i.rhrBaseline, rb.usable {
+            confidence = rb.confidence == .solid ? .building : rb.confidence
+        } else {
+            return nil
+        }
         if let v = i.restingHR, let b = i.rhrBaseline, b.usable { terms.append((wRHR, -Baselines.z(v, b))) }
         if let sp = i.sleepPerformance { terms.append((wSleep, (sp / 100 - 0.85) / 0.12)) }
         if let v = i.respiratoryRate, let b = i.respBaseline, b.usable { terms.append((wResp, -Baselines.z(v, b))) }
@@ -144,7 +155,7 @@ nonisolated public enum ChargeScorer {
         var score = 100 / (1 + exp(-logisticK * (z - logisticZ0)))
         // SpO2 folds in only when a real value exists: small penalty below 95%.
         if let s = i.spo2Avg, s < 95 { score -= min(10, (95 - s) * 2) }
-        return (Stats.clamp(score, 0, 100), hb.confidence)
+        return (Stats.clamp(score, 0, 100), confidence)
     }
 }
 

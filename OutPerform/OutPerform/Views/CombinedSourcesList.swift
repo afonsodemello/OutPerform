@@ -10,6 +10,7 @@ import SwiftUI
 
 struct CombinedSourcesList: View {
     @Environment(AppSettings.self) private var settings
+    @Environment(AppModel.self) private var appModel
     @Binding var showGoogleConnect: Bool
     private let board = SourceStatusBoard.shared
 
@@ -25,7 +26,7 @@ struct CombinedSourcesList: View {
                 }
             }
         }
-        Text("When several sources have the same data, OutPerform uses whichever has it first, then switches to the better one once it syncs. Heart rate and HRV: band → Apple Health → Google. Sleep: Apple Health → band → Google (one source per night, never mixed). Blood oxygen, skin temp and VO₂ max: Apple Health → Google.")
+        Text("Apple Health and the band are read first. Google is only asked for what Apple Health is missing (e.g. HRV or skin temperature), so syncs stay fast. When sources overlap, OutPerform uses whichever has it first, then switches to the better one once it syncs. Heart rate and HRV: band → Apple Health → Google. Sleep: Apple Health → band → Google (one source per night, never mixed). Blood oxygen, skin temp and VO₂ max: Apple Health → Google.")
             .font(.caption2).foregroundStyle(.secondary)
     }
 
@@ -35,6 +36,7 @@ struct CombinedSourcesList: View {
             set: { on in
                 if on { settings.combinedSources.insert(kind) } else { settings.combinedSources.remove(kind) }
                 if kind == .band, on { BandManager.shared.start() }
+                appModel.sourcesChanged()
             })
     }
 
@@ -60,6 +62,9 @@ struct CombinedSourcesList: View {
         case .google:
             if !GoogleAuthManager.shared.isSignedIn {
                 Button("Sign in with Google") { showGoogleConnect = true }.font(.caption)
+            } else if settings.combinedSources.contains(.appleHealth) {
+                Text("Only fetched for days and metrics Apple Health doesn't have.")
+                    .font(.caption2).foregroundStyle(.secondary)
             }
         case .band:
             NavigationLink {

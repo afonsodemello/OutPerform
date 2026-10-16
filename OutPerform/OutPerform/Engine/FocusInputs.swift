@@ -13,7 +13,7 @@ import Foundation
 /// Both the persisted `DailyRecord` (live Focus screen, main actor) and the plain
 /// `Sendable` `DayValues` (off-main batch compute) conform, so the SAME builder
 /// runs in both places without dragging SwiftData onto a background thread.
-protocol FocusDaySource {
+nonisolated protocol FocusDaySource {
     var date: Date { get }
     var sleepWake: Date? { get }
     var sleepOnset: Date? { get }
@@ -26,7 +26,7 @@ protocol FocusDaySource {
 
 extension DailyRecord: FocusDaySource {}
 
-enum FocusInputs {
+nonisolated enum FocusInputs {
 
     /// Build inputs for `record` (the day to score), using `history` (other days,
     /// any order) for baselines. Returns nil if the day lacks the minimum data

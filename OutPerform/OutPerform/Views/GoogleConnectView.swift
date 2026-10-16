@@ -123,6 +123,7 @@ struct GoogleConnectView: View {
         do {
             try await GoogleAuthManager.shared.signIn()   // presents Google consent
             signedIn = true
+            appModel.sourcesChanged()
             // Don't make the user wait on the first sync here — enter the app and
             // let it load in the background (the Today tab shows progress).
             Task { await appModel.refresh() }

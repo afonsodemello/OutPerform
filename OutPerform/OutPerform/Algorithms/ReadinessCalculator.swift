@@ -8,7 +8,7 @@
 
 import Foundation
 
-public enum ReadinessCalculator {
+nonisolated public enum ReadinessCalculator {
 
     /// 100 inside the 0.8–1.3 ACWR sweet spot, tapering 30 points per unit of
     /// distance outside it.

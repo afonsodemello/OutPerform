@@ -10,7 +10,7 @@
 
 import Foundation
 
-public struct RecoveryInput: Sendable {
+nonisolated public struct RecoveryInput: Sendable {
     // Today's nightly values.
     public var rmssd: Double?
     public var restingHR: Double?
@@ -43,7 +43,7 @@ public struct RecoveryInput: Sendable {
     }
 }
 
-public struct RecoveryResult: Sendable {
+nonisolated public struct RecoveryResult: Sendable {
     public var score: Double
     public var zone: RecoveryZone
     // Component breakdown (each 0–100, 50 == baseline) for the UI.
@@ -55,7 +55,7 @@ public struct RecoveryResult: Sendable {
     public var spo2Penalty: Double   // <= 0
 }
 
-public enum RecoveryCalculator {
+nonisolated public enum RecoveryCalculator {
 
     /// Tunable weights (Settings → Advanced); defaults from
     public struct Weights: Sendable {

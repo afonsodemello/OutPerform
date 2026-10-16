@@ -8,7 +8,7 @@
 
 import Foundation
 
-public struct SleepNeedResult: Sendable {
+nonisolated public struct SleepNeedResult: Sendable {
     public var needMinutes: Double
     public var baselineMinutes: Double
     public var strainComponentMinutes: Double
@@ -17,7 +17,7 @@ public struct SleepNeedResult: Sendable {
     public var newDebtMinutes: Double      // carried into tomorrow
 }
 
-public enum SleepNeedCalculator {
+nonisolated public enum SleepNeedCalculator {
 
     public static let defaultBaselineMinutes = 480.0   // 8h fallback
 

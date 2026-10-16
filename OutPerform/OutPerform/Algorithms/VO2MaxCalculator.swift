@@ -8,12 +8,12 @@
 
 import Foundation
 
-public enum FitnessLevel: String, Sendable {
+nonisolated public enum FitnessLevel: String, Sendable {
     case poor, average, good, elite
     public var displayName: String { rawValue.capitalized }
 }
 
-public enum VO2MaxCalculator {
+nonisolated public enum VO2MaxCalculator {
 
     /// Rough fallback: VO2max ≈ 15 × (HRmax / RHR).
     public static func estimate(hrMax: Double, restingHR: Double) -> Double? {

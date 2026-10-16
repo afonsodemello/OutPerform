@@ -8,7 +8,7 @@
 
 import Foundation
 
-public enum StressCalculator {
+nonisolated public enum StressCalculator {
 
     public struct Result: Sendable {
         public var score: Double            // 0–100

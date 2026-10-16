@@ -228,7 +228,11 @@ private extension Data {
 
 // MARK: - Provider (Google Health API — health.googleapis.com/v4)
 
-final class GoogleHealthProvider: HealthDataProvider {
+/// `nonisolated` + `@concurrent` on the fetch methods: the project defaults every
+/// type to the main actor, which made every page of JSON (tens of thousands of
+/// heart-rate points on a full sync) get parsed ON THE MAIN THREAD — the cause of
+/// the multi-second UI freezes during sync. Parsing now runs on the thread pool.
+nonisolated final class GoogleHealthProvider: HealthDataProvider {
     let sourceType: DataSourceType = .googleHealth
 
     private let base = "https://health.googleapis.com/v4/users/me"
@@ -297,8 +301,20 @@ final class GoogleHealthProvider: HealthDataProvider {
     /// Raw dataPoints for a Google Health data type, following `nextPageToken`
     /// pagination. `filter` nil → no filter (list all; used as a fallback when a
     /// type's filter syntax is rejected, then we match client-side).
+    ///
+    /// `stopBefore`/`dateOf`: an optional early-exit for the no-filter case.
+    /// Google returns dataPoints **newest-first** (relied on elsewhere, e.g.
+    /// `heartRates`), so once a page's oldest point is already before the date
+    /// we still need, every later page is older still — we can stop instead of
+    /// paging all the way to `maxPoints`. Without this, `sleepSegments`/
+    /// `workouts` re-fetch a user's ENTIRE synced history (up to `maxPoints`,
+    /// several sequential page round-trips) on every single sync regardless of
+    /// how small the requested window is — the main reason Google Health syncs
+    /// are much slower than Apple Health ones.
     private func rawDataPoints(_ dataType: String, filter: String?,
-                               maxPoints: Int = 50_000) async throws -> [[String: Any]] {
+                               maxPoints: Int = 50_000,
+                               stopBefore: Date? = nil,
+                               dateOf: (([String: Any]) -> Date?)? = nil) async throws -> [[String: Any]] {
         let token = try await token()
         var out: [[String: Any]] = []
         var pageToken: String?
@@ -319,8 +335,13 @@ final class GoogleHealthProvider: HealthDataProvider {
                 }
             }
             guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { break }
-            if let points = json["dataPoints"] as? [[String: Any]] { out.append(contentsOf: points) }
+            let points = (json["dataPoints"] as? [[String: Any]]) ?? []
+            out.append(contentsOf: points)
             pageToken = json["nextPageToken"] as? String
+            if let stopBefore, let dateOf, let oldestInPage = points.compactMap(dateOf).min(),
+               oldestInPage < stopBefore {
+                break
+            }
         } while pageToken != nil && out.count < maxPoints
         return out
     }
@@ -333,6 +354,7 @@ final class GoogleHealthProvider: HealthDataProvider {
     /// Map dataPoints to numeric QuantitySamples. The metric lives under the
     /// camelCase data-type field (e.g. `heartRate.beatsPerMinute`); time is in a
     /// nested `interval`/`sampleTime`.
+    @concurrent
     private func samples(_ dataType: String, from: Date, to: Date,
                          transform: (Double) -> Double = { $0 }) async throws -> [QuantitySample] {
         let points = (try? await rawDataPoints(dataType, from: from, to: to)) ?? []
@@ -351,6 +373,7 @@ final class GoogleHealthProvider: HealthDataProvider {
 
     // MARK: HealthDataProvider conformance
 
+    @concurrent
     func heartRates(from: Date, to: Date) async throws -> [QuantitySample] {
         // Heart-rate is high-frequency (tens of thousands of samples/day). The
         // generic reader caps at a total point count, and Google returns newest
@@ -436,11 +459,13 @@ final class GoogleHealthProvider: HealthDataProvider {
     // Beat-to-beat RR isn't available; engine falls back to the HRV summary.
     func beatToBeatRR(from: Date, to: Date) async throws -> [QuantitySample] { [] }
 
+    @concurrent
     func sleepSegments(from: Date, to: Date) async throws -> [SleepSegment] {
         // Sleep is a session whose repeated `interval` field rejects the usual
         // filter (confirmed against the live API), so list with no filter and
         // match the window client-side via each session's interval.
-        let all = (try? await rawDataPoints("sleep", filter: nil, maxPoints: 8000)) ?? []
+        let all = (try? await rawDataPoints("sleep", filter: nil, maxPoints: 8000,
+                                            stopBefore: from, dateOf: { Self.sleepInterval($0)?.0 })) ?? []
         var points = all.filter { p in
             guard let (s, e) = Self.sleepInterval(p) else { return false }
             return s < to && e > from
@@ -535,10 +560,12 @@ final class GoogleHealthProvider: HealthDataProvider {
         return secs / 60
     }
 
+    @concurrent
     func workouts(from: Date, to: Date) async throws -> [WorkoutSession] {
         var points = (try? await rawDataPoints("exercise", from: from, to: to)) ?? []
         if points.isEmpty {
-            let all = (try? await rawDataPoints("exercise", filter: nil, maxPoints: 4000)) ?? []
+            let all = (try? await rawDataPoints("exercise", filter: nil, maxPoints: 4000,
+                                                stopBefore: from, dateOf: { Self.startTime($0) })) ?? []
             points = all.filter { p in
                 guard let s = Self.startTime(p) else { return false }
                 let e = Self.endTime(p) ?? s

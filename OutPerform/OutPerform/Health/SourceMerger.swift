@@ -115,11 +115,47 @@ nonisolated public enum SourceMerger {
         return out.sorted { $0.start < $1.start }
     }
 
+    // MARK: Gap finding
+
+    /// The days (or nights, keyed by wake day) a fetch over `[from, to]`
+    /// should contain. A night counts only once it's under way (after 04:00),
+    /// so the coming night never looks "missing" in the evening.
+    public static func expectedKeys(from: Date, to: Date, now: Date, nights: Bool,
+                                    calendar: Calendar = .current) -> Set<Date> {
+        let end = min(to, now)
+        var keys = Set<Date>()
+        if nights {
+            var d = calendar.startOfDay(for: from.addingTimeInterval(6 * 3600))
+            while d.addingTimeInterval(4 * 3600) <= end {
+                keys.insert(d)
+                d = calendar.date(byAdding: .day, value: 1, to: d)!
+            }
+        } else {
+            var d = calendar.startOfDay(for: from)
+            while d <= end {
+                keys.insert(d)
+                d = calendar.date(byAdding: .day, value: 1, to: d)!
+            }
+        }
+        return keys
+    }
+
+    /// One contiguous window covering every missing key, clamped to the
+    /// original request. nil when nothing is missing.
+    public static func fetchSpan(for missing: Set<Date>, nights: Bool, clampFrom: Date, clampTo: Date,
+                                 calendar: Calendar = .current) -> (Date, Date)? {
+        guard let first = missing.min(), let last = missing.max() else { return nil }
+        let start = nights ? first.addingTimeInterval(-6 * 3600) : first
+        let end = nights ? last.addingTimeInterval(14 * 3600) : calendar.date(byAdding: .day, value: 1, to: last)!
+        let a = max(start, clampFrom), b = min(end, clampTo)
+        return a < b ? (a, b) : nil
+    }
+
     // MARK: Sleep
 
     /// Night key: the calendar day you wake up on (an 18:00 → 14:00 window,
     /// matching the engine), from the segment's midpoint.
-    static func nightKey(_ s: SleepSegment, _ calendar: Calendar) -> Date {
+    public static func nightKey(_ s: SleepSegment, _ calendar: Calendar) -> Date {
         let mid = s.start.addingTimeInterval(s.end.timeIntervalSince(s.start) / 2)
         return calendar.startOfDay(for: mid.addingTimeInterval(6 * 3600))
     }

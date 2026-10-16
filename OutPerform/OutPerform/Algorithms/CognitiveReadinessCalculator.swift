@@ -23,7 +23,7 @@
 
 import Foundation
 
-public struct CognitiveInputs: Sendable {
+nonisolated public struct CognitiveInputs: Sendable {
     /// When the person woke this morning.
     public var wakeTime: Date
     /// Last night's total sleep (minutes).
@@ -63,7 +63,7 @@ public struct CognitiveInputs: Sendable {
     }
 }
 
-public struct CognitiveDrivers: Sendable {
+nonisolated public struct CognitiveDrivers: Sendable {
     public var sleepPressure: Double   // 0–100 (Process S contribution)
     public var circadian: Double       // 0–100 (Process C contribution at the time)
     public var recoveryState: Double   // 0–100 (HRV-based)
@@ -71,13 +71,13 @@ public struct CognitiveDrivers: Sendable {
     public var sleepInertia: Double    // 0–100 (100 = fully cleared)
 }
 
-public struct FocusWindow: Sendable {
+nonisolated public struct FocusWindow: Sendable {
     public var start: Date
     public var end: Date
     public var peakScore: Double
 }
 
-public enum CognitiveReadinessCalculator {
+nonisolated public enum CognitiveReadinessCalculator {
 
     // MARK: Tunables (documented, defensible defaults)
 
@@ -342,7 +342,7 @@ public enum CognitiveReadinessCalculator {
     }
 }
 
-public enum FocusZone: String, Sendable {
+nonisolated public enum FocusZone: String, Sendable {
     case low, moderate, high, peak
 
     public nonisolated init(score: Double) {

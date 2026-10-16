@@ -45,11 +45,23 @@ final class AppModel {
         }
     }
 
+    /// The set of sources feeding the engine changed (new source, a source
+    /// toggled, Google signed in, band paired). The engine normally re-fetches
+    /// only the last 2 days and treats any day with *some* data as done, so
+    /// older days would never pick up what the new source adds (e.g. HRV for
+    /// nights that only had sleep). Forget the incremental window so the next
+    /// sync re-reads the full 30 days; stored records are merged, not wiped.
+    func sourcesChanged() {
+        ScoreEngine.nextFetchStart = nil
+        ScoreEngine.knownEmptyDays = []
+    }
+
     /// Switch the active source (e.g. from Settings) and rebuild the provider.
     /// Switching between Demo and a real source (in either direction) wipes all
     /// stored records so demo values never contaminate live data and vice versa.
     func switchSource(to type: DataSourceType) {
         let previousSource = settings.dataSource
+        if previousSource != type { sourcesChanged() }
         let needsReset = previousSource == .demo || type == .demo
         settings.dataSource = type
         // The band (alone or in "All sources") is scored with the open-science

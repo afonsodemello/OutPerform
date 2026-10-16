@@ -7,7 +7,7 @@
 
 import Foundation
 
-public enum Stats {
+nonisolated public enum Stats {
 
     public static func mean(_ xs: [Double]) -> Double {
         guard !xs.isEmpty else { return 0 }

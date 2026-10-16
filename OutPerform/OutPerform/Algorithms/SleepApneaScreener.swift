@@ -8,7 +8,7 @@
 
 import Foundation
 
-public struct ApneaScreeningResult: Sendable {
+nonisolated public struct ApneaScreeningResult: Sendable {
     public var odi: Double                  // events per hour of sleep
     public var desaturationEvents: Int
     public var minSpO2: Double
@@ -17,7 +17,7 @@ public struct ApneaScreeningResult: Sendable {
     public var risk: ApneaRisk
 }
 
-public enum SleepApneaScreener {
+nonisolated public enum SleepApneaScreener {
 
     /// Count desaturations ≥3% below a rolling baseline lasting ≥10s, then the
     /// Oxygen Desaturation Index = events / sleep-hours.

@@ -10,7 +10,7 @@
 
 import Foundation
 
-public enum HRVAnalysis {
+nonisolated public enum HRVAnalysis {
 
     /// Convert a heart-rate value in beats-per-minute to an RR interval in ms.
     public static func rrIntervalMs(fromBPM bpm: Double) -> Double {

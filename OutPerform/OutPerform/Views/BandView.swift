@@ -131,7 +131,10 @@ struct BandView: View {
                 .disabled(band.state == .bluetoothOff || band.state == .unauthorized)
             }
             ForEach(band.discovered) { device in
-                Button { band.pair(with: device.id) } label: {
+                Button {
+                    band.pair(with: device.id)
+                    appModel.sourcesChanged()
+                } label: {
                     HStack {
                         VStack(alignment: .leading) {
                             Text(device.name).foregroundStyle(.primary)

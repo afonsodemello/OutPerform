@@ -6,7 +6,9 @@
 //  at the same time and blends them with `SourceMerger`, so each slice of
 //  data comes from whichever source has it first and best.
 //
-//  • Every source is queried in parallel for every metric.
+//  • Apple Health and the band (both local) are read first, in parallel.
+//    Google is then asked only for the days Apple Health has no data for,
+//    and not at all when Apple covers the range, so syncs stay fast.
 //  • Each call has its own time limit. A slow or failing source (say Google
 //    is offline or its token expired) never holds up the sync; it's skipped
 //    for that round and its status shows why.
@@ -30,6 +32,7 @@ final class SourceStatusBoard {
         var lastSuccess: Date?
         var lastError: String?
         var lastErrorAt: Date?
+        var lastSkipped: Date?
 
         /// An error only counts if nothing succeeded after it.
         var isFailing: Bool {
@@ -42,6 +45,8 @@ final class SourceStatusBoard {
 
     func notUsed(_ kind: SourceKind, _ reason: String?) { statuses[kind, default: Status()].notUsedReason = reason }
     func succeeded(_ kind: SourceKind) { statuses[kind, default: Status()].lastSuccess = Date() }
+    /// Google wasn't needed: Apple Health already had that data.
+    func skippedGoogle() { statuses[.google, default: Status()].lastSkipped = Date() }
     func failed(_ kind: SourceKind, _ message: String) {
         statuses[kind, default: Status()].lastError = message
         statuses[kind, default: Status()].lastErrorAt = Date()
@@ -105,18 +110,71 @@ final class CombinedDataProvider: HealthDataProvider {
 
     // MARK: Fan-out
 
-    /// Run `fetch` against every active source in parallel, each under the
-    /// time limit. Failures become empty results plus a status entry.
-    private func gather<T: Sendable>(_ fetch: @escaping (HealthDataProvider) async throws -> [T]) async -> [SourceKind: [T]] {
-        let kinds = active
+    /// How a metric's data is bucketed when deciding whether Apple Health
+    /// already has it.
+    enum Bucketing {
+        /// Calendar days; a day counts as covered with ≥ `minPerDay` samples.
+        case days(minPerDay: Int)
+        /// Nights (keyed by wake day); covered once the summed weight (asleep
+        /// minutes, or beats) reaches `minWeight`.
+        case nights(minWeight: Double)
+    }
+
+    /// Fetch one metric. Apple Health and the band are local and fast, so
+    /// they're read first, in parallel. Google is then asked only for the
+    /// days/nights Apple Health has nothing for (and not at all when Apple
+    /// covers the whole range). Without Apple Health, Google covers everything.
+    private func gather<T: Sendable>(from: Date, to: Date, bucketing: Bucketing,
+                                     key: @escaping (T) -> Date,
+                                     weight: @escaping (T) -> Double = { _ in 1 },
+                                     coveredBy appleCoverage: Set<Date>? = nil,
+                                     _ fetch: @escaping (HealthDataProvider, Date, Date) async throws -> [T]) async -> [SourceKind: [T]] {
         for k in SourceKind.allCases { board.notUsed(k, reason(k)) }
+        let kinds = active
+        let local = kinds.filter { $0 != .google }
+        var results = await run(local, from: from, to: to, fetch)
+
+        guard kinds.contains(.google) else { return results }
+        var googleFrom = from, googleTo = to
+        if kinds.contains(.appleHealth), let appleData = results[.appleHealth] {
+            let covered = appleCoverage ?? Self.coveredKeys(appleData, bucketing: bucketing, key: key, weight: weight)
+            let expected = SourceMerger.expectedKeys(from: from, to: to, now: Date(), nights: Self.isNights(bucketing))
+            let missing = expected.subtracting(covered)
+            guard let span = SourceMerger.fetchSpan(for: missing, nights: Self.isNights(bucketing), clampFrom: from, clampTo: to) else {
+                board.skippedGoogle()
+                return results
+            }
+            (googleFrom, googleTo) = span
+        }
+        let g = await run([.google], from: googleFrom, to: googleTo, fetch)
+        results[.google] = g[.google]
+        return results
+    }
+
+    private static func isNights(_ b: Bucketing) -> Bool { if case .nights = b { return true } else { return false } }
+
+    private static func coveredKeys<T>(_ data: [T], bucketing: Bucketing, key: (T) -> Date, weight: (T) -> Double) -> Set<Date> {
+        var totals: [Date: Double] = [:]
+        for item in data { totals[key(item), default: 0] += weight(item) }
+        let threshold: Double
+        switch bucketing {
+        case .days(let n): threshold = Double(n)
+        case .nights(let w): threshold = w
+        }
+        return Set(totals.filter { $0.value >= threshold }.keys)
+    }
+
+    /// Run `fetch` against `kinds` in parallel, each under the time limit.
+    /// Failures become empty results plus a status entry.
+    private func run<T: Sendable>(_ kinds: [SourceKind], from: Date, to: Date,
+                                  _ fetch: @escaping (HealthDataProvider, Date, Date) async throws -> [T]) async -> [SourceKind: [T]] {
         let calls = kinds.map { k in (k, provider(k)) }
         var results: [SourceKind: [T]] = [:]
         await withTaskGroup(of: (SourceKind, Result<[T], Error>).self) { group in
             for (kind, p) in calls {
                 group.addTask {
                     do {
-                        let value = try await Self.withTimeout(Self.perSourceTimeout) { try await fetch(p) }
+                        let value = try await Self.withTimeout(Self.perSourceTimeout) { try await fetch(p, from, to) }
                         return (kind, .success(value))
                     } catch {
                         return (kind, .failure(error))
@@ -134,6 +192,24 @@ final class CombinedDataProvider: HealthDataProvider {
             }
         }
         return results
+    }
+
+    // Apple Health heart-rate coverage, shared by the metrics that are gated
+    // on "was Apple recording that day" rather than on their own samples.
+    private var appleHRCoverage: [String: Task<Set<Date>, Never>] = [:]
+
+    private func appleHeartRateDays(from: Date, to: Date) async -> Set<Date>? {
+        guard active.contains(.appleHealth) else { return nil }
+        let k = "\(from.timeIntervalSince1970)-\(to.timeIntervalSince1970)"
+        if let t = appleHRCoverage[k] { return await t.value }
+        let apple = self.apple
+        let t = Task { () -> Set<Date> in
+            let hr = (try? await apple.heartRates(from: from, to: to)) ?? []
+            return Self.coveredKeys(hr, bucketing: .days(minPerDay: 24),
+                                    key: { Calendar.current.startOfDay(for: $0.start) }, weight: { _ in 1 })
+        }
+        appleHRCoverage = [k: t]   // keep only the current sync's window
+        return await t.value
     }
 
     private static func describe(_ e: Error) -> String {
@@ -159,54 +235,87 @@ final class CombinedDataProvider: HealthDataProvider {
 
     // MARK: HealthDataProvider
 
+    private static func day(_ q: QuantitySample) -> Date { Calendar.current.startOfDay(for: q.start) }
+    private static func night(_ q: QuantitySample) -> Date {
+        Calendar.current.startOfDay(for: q.start.addingTimeInterval(6 * 3600))
+    }
+
     func heartRates(from: Date, to: Date) async throws -> [QuantitySample] {
-        SourceMerger.mergeSeries(await gather { try await $0.heartRates(from: from, to: to) })
+        // A day counts as covered once Apple has ≥ 24 readings (≈ 2 h of a
+        // watch's 5-minute background sampling).
+        SourceMerger.mergeSeries(await gather(from: from, to: to, bucketing: .days(minPerDay: 24), key: Self.day) {
+            try await $0.heartRates(from: $1, to: $2)
+        })
     }
 
     func beatToBeatRR(from: Date, to: Date) async throws -> [QuantitySample] {
-        SourceMerger.mergeBeatsByNight(await gather { try await $0.beatToBeatRR(from: from, to: to) })
+        SourceMerger.mergeBeatsByNight(await gather(from: from, to: to, bucketing: .nights(minWeight: 200), key: Self.night) {
+            try await $0.beatToBeatRR(from: $1, to: $2)
+        })
     }
 
     func nightlyRMSSD(from: Date, to: Date) async throws -> [QuantitySample] {
-        SourceMerger.mergeDaily(await gather { try await $0.nightlyRMSSD(from: from, to: to) },
-                                priority: SourceMerger.cardiacPriority)
+        SourceMerger.mergeDaily(await gather(from: from, to: to, bucketing: .days(minPerDay: 1), key: Self.day) {
+            try await $0.nightlyRMSSD(from: $1, to: $2)
+        }, priority: SourceMerger.cardiacPriority)
     }
 
     func hrvSDNN(from: Date, to: Date) async throws -> [QuantitySample] {
-        SourceMerger.mergeDaily(await gather { try await $0.hrvSDNN(from: from, to: to) },
-                                priority: SourceMerger.cardiacPriority)
+        SourceMerger.mergeDaily(await gather(from: from, to: to, bucketing: .days(minPerDay: 1), key: Self.day) {
+            try await $0.hrvSDNN(from: $1, to: $2)
+        }, priority: SourceMerger.cardiacPriority)
     }
 
     func restingHeartRate(from: Date, to: Date) async throws -> [QuantitySample] {
-        SourceMerger.mergeDaily(await gather { try await $0.restingHeartRate(from: from, to: to) },
-                                priority: SourceMerger.cardiacPriority)
+        SourceMerger.mergeDaily(await gather(from: from, to: to, bucketing: .days(minPerDay: 1), key: Self.day) {
+            try await $0.restingHeartRate(from: $1, to: $2)
+        }, priority: SourceMerger.cardiacPriority)
     }
 
     func respiratoryRate(from: Date, to: Date) async throws -> [QuantitySample] {
-        SourceMerger.mergeDaily(await gather { try await $0.respiratoryRate(from: from, to: to) },
-                                priority: SourceMerger.cardiacPriority)
+        SourceMerger.mergeDaily(await gather(from: from, to: to, bucketing: .days(minPerDay: 1), key: Self.day) {
+            try await $0.respiratoryRate(from: $1, to: $2)
+        }, priority: SourceMerger.cardiacPriority)
     }
 
     func oxygenSaturation(from: Date, to: Date) async throws -> [QuantitySample] {
-        SourceMerger.mergeDaily(await gather { try await $0.oxygenSaturation(from: from, to: to) },
-                                priority: SourceMerger.vitalsPriority)
+        SourceMerger.mergeDaily(await gather(from: from, to: to, bucketing: .days(minPerDay: 1), key: Self.day) {
+            try await $0.oxygenSaturation(from: $1, to: $2)
+        }, priority: SourceMerger.vitalsPriority)
     }
 
     func wristTemperature(from: Date, to: Date) async throws -> [QuantitySample] {
-        SourceMerger.mergeDaily(await gather { try await $0.wristTemperature(from: from, to: to) },
-                                priority: SourceMerger.vitalsPriority)
+        SourceMerger.mergeDaily(await gather(from: from, to: to, bucketing: .days(minPerDay: 1), key: Self.day) {
+            try await $0.wristTemperature(from: $1, to: $2)
+        }, priority: SourceMerger.vitalsPriority)
     }
 
     func vo2Max(from: Date, to: Date) async throws -> [QuantitySample] {
-        SourceMerger.mergeDaily(await gather { try await $0.vo2Max(from: from, to: to) },
-                                priority: SourceMerger.vitalsPriority)
+        // VO2 max is written every few days, so gate it on whether Apple was
+        // recording at all that day rather than on VO2 samples.
+        let covered = await appleHeartRateDays(from: from, to: to)
+        return SourceMerger.mergeDaily(await gather(from: from, to: to, bucketing: .days(minPerDay: 1), key: Self.day,
+                                                    coveredBy: covered) {
+            try await $0.vo2Max(from: $1, to: $2)
+        }, priority: SourceMerger.vitalsPriority)
     }
 
     func sleepSegments(from: Date, to: Date) async throws -> [SleepSegment] {
-        SourceMerger.mergeSleep(await gather { try await $0.sleepSegments(from: from, to: to) })
+        SourceMerger.mergeSleep(await gather(from: from, to: to, bucketing: .nights(minWeight: 60),
+                                             key: { SourceMerger.nightKey($0, .current) },
+                                             weight: { $0.stage.isAsleep ? $0.durationMinutes : 0 }) {
+            try await $0.sleepSegments(from: $1, to: $2)
+        })
     }
 
     func workouts(from: Date, to: Date) async throws -> [WorkoutSession] {
-        SourceMerger.mergeWorkouts(await gather { try await $0.workouts(from: from, to: to) })
+        // Rest days have no workouts, so gate on Apple's heart-rate coverage:
+        // if Apple was recording that day, its workout list is complete.
+        let covered = await appleHeartRateDays(from: from, to: to)
+        return SourceMerger.mergeWorkouts(await gather(from: from, to: to, bucketing: .days(minPerDay: 1),
+                                                       key: { Calendar.current.startOfDay(for: $0.start) },
+                                                       coveredBy: covered) {
+            try await $0.workouts(from: $1, to: $2)
+        })
     }
 }
