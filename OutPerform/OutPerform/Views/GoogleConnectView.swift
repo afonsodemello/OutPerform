@@ -116,7 +116,10 @@ struct GoogleConnectView: View {
     private func signIn() async {
         working = true; error = nil; status = nil
         GoogleHealthConfig.setClientID(clientID)
-        appModel.switchSource(to: .googleHealth)
+        // Inside "All sources", signing in just adds Google to the mix.
+        if appModel.settings.dataSource != .combined {
+            appModel.switchSource(to: .googleHealth)
+        }
         do {
             try await GoogleAuthManager.shared.signIn()   // presents Google consent
             signedIn = true

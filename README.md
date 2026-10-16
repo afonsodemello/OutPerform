@@ -100,6 +100,27 @@ Without an accelerometer channel, sleep/wake rests on heart rate alone and
 staging is approximate. Blood oxygen and skin temperature aren't part of the
 open heart-rate profile.
 
+## All sources at once
+
+The **All sources** option (`Health/CombinedDataProvider.swift`) reads Apple
+Health, Google Health and the Bluetooth band in parallel and blends them with
+`Health/SourceMerger.swift`. Each slice of data comes from whichever source has
+it first; when a better source catches up, it takes over on the next sync:
+
+| Data | Priority | Unit of choice |
+|---|---|---|
+| Heart rate | band → Apple Health → Google | per minute (gaps filled by the next source) |
+| Beat-to-beat intervals | band → Apple Health → Google | per night (never mixed) |
+| HRV, resting HR, breathing | band → Apple Health → Google | per day |
+| Sleep | Apple Health → band → Google | per night, one hypnogram; staged beats unstaged, fragments < 60 min lose |
+| SpO₂, skin temp, VO₂ max | Apple Health → Google | per day |
+| Workouts | union, overlaps ≥ 50% merged | the higher-priority copy borrows HR / calories |
+
+Every source call has its own 45-second limit. A slow or failing source is
+skipped for that sync, and Settings shows each source's status. Each source can
+be turned on or off, and Google joins only once you're signed in, the band only
+once paired.
+
 ## Architecture
 
 ```

@@ -13,6 +13,7 @@ public enum DataSourceType: String, CaseIterable, Sendable, Codable {
     case appleHealth
     case googleHealth
     case bluetooth
+    case combined
     case demo
 
     public var displayName: String {
@@ -20,6 +21,7 @@ public enum DataSourceType: String, CaseIterable, Sendable, Codable {
         case .appleHealth:  return "Apple Health"
         case .googleHealth: return "Google Health"
         case .bluetooth:    return "Bluetooth band"
+        case .combined:     return "All sources"
         case .demo:         return "Demo"
         }
     }
@@ -32,6 +34,8 @@ public enum DataSourceType: String, CaseIterable, Sendable, Codable {
             return "Connects to your Google account via the Google Health API (the platform replacing Fitbit). Requires sign-in and a configured OAuth client."
         case .bluetooth:
             return "Pairs directly with your band (Fitbit Air or any standard heart-rate band) over Bluetooth. Heart rate and heartbeats are recorded on this iPhone and every score is computed here — no account, no cloud."
+        case .combined:
+            return "Uses Apple Health, Google Health and your Bluetooth band at the same time. Each piece of data comes from whichever source has it first and best, so syncs fill in faster and gaps in one source are covered by another."
         case .demo:
             return "Explore OutPerform with 30 days of sample data — no wearable required. Switching to a real source will clear all demo data."
         }
@@ -42,9 +46,15 @@ public enum DataSourceType: String, CaseIterable, Sendable, Codable {
         case .appleHealth:  return "heart.fill"
         case .googleHealth: return "g.circle.fill"
         case .bluetooth:    return "dot.radiowaves.left.and.right"
+        case .combined:     return "square.stack.3d.up.fill"
         case .demo:         return "sparkles"
         }
     }
+}
+
+extension DataSourceType {
+    /// Sources that talk to the Bluetooth band.
+    public var usesBand: Bool { self == .bluetooth || self == .combined }
 }
 
 @Observable
@@ -78,6 +88,12 @@ final class AppSettings {
 
     var biologicalSex: BiologicalSex {
         didSet { defaults.set(biologicalSex.rawValue, forKey: "biologicalSex") }
+    }
+
+    /// Which sources "All sources" draws from (each must also be ready:
+    /// Google signed in, band paired).
+    var combinedSources: Set<SourceKind> {
+        didSet { defaults.set(combinedSources.map(\.rawValue), forKey: "combinedSources") }
     }
 
     /// Body weight and height, used for calorie estimates (Keytel / Harris–Benedict).
@@ -143,6 +159,8 @@ final class AppSettings {
             birthDate = cal.date(byAdding: .year, value: -years, to: Date()) ?? Date()
         }
         biologicalSex = BiologicalSex(rawValue: defaults.string(forKey: "biologicalSex") ?? "") ?? .other
+        combinedSources = Set((defaults.stringArray(forKey: "combinedSources") ?? SourceKind.allCases.map(\.rawValue))
+            .compactMap(SourceKind.init(rawValue:)))
         weightKg = defaults.object(forKey: "weightKg") as? Double ?? 75
         heightCm = defaults.object(forKey: "heightCm") as? Double ?? 175
         let storedWake = defaults.object(forKey: "wakeMinuteOfDay") as? Int

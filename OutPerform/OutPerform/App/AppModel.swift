@@ -29,10 +29,10 @@ final class AppModel {
     private func configureBand() {
         let band = BandManager.shared
         band.onScoringTick = { [weak self] in
-            guard let self, self.settings.dataSource == .bluetooth else { return }
+            guard let self, self.settings.dataSource.usesBand else { return }
             Task { await self.refresh() }
         }
-        if settings.dataSource == .bluetooth || band.isPaired { band.start() }
+        if settings.dataSource.usesBand || band.isPaired { band.start() }
     }
 
     static func makeProvider(for type: DataSourceType) -> HealthDataProvider {
@@ -40,6 +40,7 @@ final class AppModel {
         case .appleHealth:  return HealthKitProvider()
         case .googleHealth: return GoogleHealthProvider()
         case .bluetooth:    return BandDataProvider()
+        case .combined:     return CombinedDataProvider()
         case .demo:         return DemoDataProvider()
         }
     }
@@ -51,15 +52,15 @@ final class AppModel {
         let previousSource = settings.dataSource
         let needsReset = previousSource == .demo || type == .demo
         settings.dataSource = type
-        // The band is scored with the open-science (NOOP-method) model; the
-        // other sources keep OutPerform's classic formulas.
+        // The band (alone or in "All sources") is scored with the open-science
+        // (NOOP-method) model; the other sources keep OutPerform's classic formulas.
         let config = AlgorithmConfig.shared
-        let model: ScoringModel = type == .bluetooth ? .openScience : .outperform
+        let model: ScoringModel = type.usesBand ? .openScience : .outperform
         if config.scoringModel != model {
             config.scoringModel = model
             config.save()
         }
-        if type == .bluetooth { BandManager.shared.start() }
+        if type.usesBand { BandManager.shared.start() }
         if needsReset {
             engine.deleteAllData()
             WidgetBridge.publish(readiness: nil, recovery: nil, strain: nil,

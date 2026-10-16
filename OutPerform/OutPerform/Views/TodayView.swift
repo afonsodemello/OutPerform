@@ -49,7 +49,10 @@ struct TodayView: View {
                         .padding(12)
                         .background(.background.secondary, in: RoundedRectangle(cornerRadius: 14))
                     }
-                    if settings.dataSource == .bluetooth { LiveBandCard() }
+                    if settings.dataSource == .bluetooth
+                        || (settings.dataSource == .combined && settings.combinedSources.contains(.band)) {
+                        LiveBandCard()
+                    }
                     if let illness = appModel.illnessSignal() {
                         banner("Early-warning", illness.message, .opRed)
                     }

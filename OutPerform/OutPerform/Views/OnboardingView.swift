@@ -161,6 +161,16 @@ struct OnboardingView: View {
             showBandPairing = true
             return
         }
+        // All sources: authorize Apple Health now, then offer band pairing.
+        // Google can be added any time from Settings.
+        if selectedSource == .combined {
+            appModel.switchSource(to: .combined)
+            authorizing = true
+            try? await appModel.engine.provider.requestAuthorization()
+            authorizing = false
+            showBandPairing = true
+            return
+        }
         // Demo needs no authorization — just switch and sync.
         if selectedSource == .demo {
             appModel.switchSource(to: .demo)

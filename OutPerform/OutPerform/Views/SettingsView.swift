@@ -38,6 +38,9 @@ struct SettingsView: View {
                         ForEach(DataSourceType.allCases, id: \.self) { Text($0.displayName).tag($0) }
                     }
                     Text(settings.dataSource.detail).font(.caption).foregroundStyle(.secondary)
+                    if settings.dataSource == .combined {
+                        CombinedSourcesList(showGoogleConnect: $showGoogleConnect)
+                    }
                     if settings.dataSource == .bluetooth {
                         NavigationLink {
                             BandView()
