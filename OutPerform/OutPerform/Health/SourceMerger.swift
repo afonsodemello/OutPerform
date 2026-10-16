@@ -131,7 +131,9 @@ nonisolated public enum SourceMerger {
                 d = calendar.date(byAdding: .day, value: 1, to: d)!
             }
         } else {
-            var d = calendar.startOfDay(for: from)
+            // The engine's fetch starts at 18:00 the evening before its first
+            // day; that partial lead-in day isn't a gap worth filling.
+            var d = calendar.startOfDay(for: from.addingTimeInterval(6 * 3600))
             while d <= end {
                 keys.insert(d)
                 d = calendar.date(byAdding: .day, value: 1, to: d)!
