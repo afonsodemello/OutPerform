@@ -76,6 +76,14 @@ struct SettingsView: View {
                     }
                 }
 
+                Section {
+                    NavigationLink {
+                        ZoneSettingsView()
+                    } label: {
+                        Label("Heart-rate zones & alerts", systemImage: "heart.text.square")
+                    }
+                }
+
                 Section("Sleep planner") {
                     Picker("Performance target", selection: $settings.performanceTarget) {
                         ForEach(SleepNeedCalculator.PerformanceTarget.allCases, id: \.self) {

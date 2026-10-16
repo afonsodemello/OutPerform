@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SwiftData
+import UserNotifications
 
 @main
 struct OutPerformApp: App {
@@ -18,6 +19,9 @@ struct OutPerformApp: App {
         // Purge stale OAuth tokens left over from a previous install before
         // anything else runs — prevents the infinite-retry loop on Google Health.
         Keychain.clearIfFreshInstall()
+        // Show zone alerts (and other OutPerform notifications) as banners
+        // even while the app is open.
+        UNUserNotificationCenter.current().delegate = ForegroundNotificationPresenter.shared
 
         let container = try! ModelContainer(for: DailyRecord.self, FocusTest.self, DailyFeedback.self)
         self.container = container

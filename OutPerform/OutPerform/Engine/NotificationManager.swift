@@ -14,7 +14,10 @@ final class NotificationManager {
     private let center = UNUserNotificationCenter.current()
 
     func requestAuthorization() async {
-        _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge])
+        let center = center
+        _ = try? await PermissionGate.shared.run {
+            try await center.requestAuthorization(options: [.alert, .sound, .badge])
+        }
     }
 
     /// Schedule a daily reminder 30 minutes before the recommended bedtime.

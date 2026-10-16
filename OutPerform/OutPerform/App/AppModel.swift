@@ -22,6 +22,7 @@ final class AppModel {
         let provider = AppModel.makeProvider(for: settings.dataSource)
         self.engine = ScoreEngine(provider: provider, settings: settings, modelContext: modelContext)
         configureBand()
+        WorkoutRecorder.shared.recoverIfNeeded()
     }
 
     /// Start the Bluetooth link when the band is the source (or one is paired),
@@ -32,10 +33,15 @@ final class AppModel {
             guard let self, self.settings.dataSource.usesBand else { return }
             Task { await self.refresh() }
         }
-        if settings.dataSource.usesBand || band.isPaired { band.start() }
+        if settings.dataSource.usesBand || band.isPaired { Task { await band.startWhenReady() } }
     }
 
     static func makeProvider(for type: DataSourceType) -> HealthDataProvider {
+        // Workouts recorded in the Exercise tab join every real source.
+        type == .demo ? baseProvider(for: type) : RecordedWorkoutsProvider(base: baseProvider(for: type))
+    }
+
+    private static func baseProvider(for type: DataSourceType) -> HealthDataProvider {
         switch type {
         case .appleHealth:  return HealthKitProvider()
         case .googleHealth: return GoogleHealthProvider()
@@ -72,7 +78,8 @@ final class AppModel {
             config.scoringModel = model
             config.save()
         }
-        if type.usesBand { BandManager.shared.start() }
+        // Bluetooth starts from the provider's requestAuthorization, after
+        // Apple Health has been asked, so the two popups never collide.
         if needsReset {
             engine.deleteAllData()
             WidgetBridge.publish(readiness: nil, recovery: nil, strain: nil,

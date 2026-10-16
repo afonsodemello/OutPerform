@@ -8,6 +8,7 @@
 
 import Foundation
 import HealthKit
+import UIKit
 
 final class HealthKitProvider: HealthDataProvider {
     let sourceType: DataSourceType = .appleHealth
@@ -38,13 +39,60 @@ final class HealthKitProvider: HealthDataProvider {
 
     func requestAuthorization() async throws {
         guard HKHealthStore.isHealthDataAvailable() else { throw HealthDataError.notAvailable }
-        try await store.requestAuthorization(toShare: [], read: readTypes)
+        let store = store, types = readTypes
+        // Queued behind any other permission popup, or iOS drops this sheet.
+        try await PermissionGate.shared.run {
+            try await store.requestAuthorization(toShare: [], read: types)
+        }
+        // Only trust it once Apple confirms the question was really asked.
+        Self.authorizationRequested = !(await needsAuthorization())
+    }
+
+    // MARK: Authorization guard
+
+    /// Set once Apple's permission sheet has been shown for every type we read
+    /// (this launch). Shared by every HealthKitProvider instance.
+    private static var authorizationRequested = false
+    private static var authorizationTask: Task<Void, Error>?
+
+    /// True when Apple Health has never been asked about some type we read.
+    /// (Apple never reveals whether *read* access was granted, only whether
+    /// the question has been asked.)
+    func needsAuthorization() async -> Bool {
+        guard HKHealthStore.isHealthDataAvailable() else { return false }
+        let status = try? await store.statusForAuthorizationRequest(toShare: [], read: readTypes)
+        return status != .unnecessary
+    }
+
+    /// Every query calls this first. Querying a type nobody has asked about
+    /// fails with "Authorization not determined", which used to happen on any
+    /// path that synced without going through onboarding or the Settings
+    /// source picker. Asks once (concurrent queries share the request); in the
+    /// background, where the sheet can't show, Apple Health sits this sync out.
+    func ensureAuthorized() async throws {
+        if Self.authorizationRequested { return }
+        if let pending = Self.authorizationTask { return try await pending.value }
+        // One shared task, registered before any await, so the parallel
+        // queries of a sync don't each start their own request.
+        let task = Task { () throws in
+            guard await self.needsAuthorization() else { return }
+            // "inactive" while the app is launching is fine; only a real
+            // background sync can't show the sheet.
+            guard UIApplication.shared.applicationState != .background else {
+                throw HealthDataError.network("Apple Health needs permission — open OutPerform to allow it.")
+            }
+            try await self.requestAuthorization()
+        }
+        Self.authorizationTask = task
+        defer { Self.authorizationTask = nil }
+        try await task.value
     }
 
     // MARK: Generic quantity query
 
     private func quantitySamples(_ type: HKQuantityType, unit: HKUnit,
                                  from: Date, to: Date) async throws -> [QuantitySample] {
+        try await ensureAuthorized()
         let predicate = HKQuery.predicateForSamples(withStart: from, end: to, options: .strictStartDate)
         let sort = [NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)]
         return try await withCheckedThrowingContinuation { cont in
@@ -60,9 +108,33 @@ final class HealthKitProvider: HealthDataProvider {
         }
     }
 
+    /// One average per minute, computed inside HealthKit. A wearable that
+    /// writes heart rate every few seconds can put hundreds of thousands of
+    /// raw samples into 30 days, which made this the slowest part of a sync;
+    /// strain and resting HR already work on 1-minute bins.
     func heartRates(from: Date, to: Date) async throws -> [QuantitySample] {
-        try await quantitySamples(HKQuantityType(.heartRate),
-                                  unit: HKUnit.count().unitDivided(by: .minute()), from: from, to: to)
+        try await ensureAuthorized()
+        let type = HKQuantityType(.heartRate)
+        let unit = HKUnit.count().unitDivided(by: .minute())
+        let predicate = HKQuery.predicateForSamples(withStart: from, end: to, options: .strictStartDate)
+        let anchor = Calendar.current.startOfDay(for: from)
+        return try await withCheckedThrowingContinuation { cont in
+            let q = HKStatisticsCollectionQuery(quantityType: type, quantitySamplePredicate: predicate,
+                                                options: .discreteAverage, anchorDate: anchor,
+                                                intervalComponents: DateComponents(minute: 1))
+            q.initialResultsHandler = { _, collection, error in
+                if let error { cont.resume(throwing: error); return }
+                var out: [QuantitySample] = []
+                collection?.enumerateStatistics(from: from, to: to) { stats, _ in
+                    if let avg = stats.averageQuantity() {
+                        out.append(QuantitySample(start: stats.startDate, end: stats.endDate,
+                                                  value: avg.doubleValue(for: unit)))
+                    }
+                }
+                cont.resume(returning: out)
+            }
+            store.execute(q)
+        }
     }
 
     func hrvSDNN(from: Date, to: Date) async throws -> [QuantitySample] {
@@ -75,6 +147,7 @@ final class HealthKitProvider: HealthDataProvider {
     /// `HKHeartbeatSeriesQuery`; consecutive beat timestamps give the RR
     /// interval, skipping any beat flagged `precededByGap`.
     func beatToBeatRR(from: Date, to: Date) async throws -> [QuantitySample] {
+        try await ensureAuthorized()
         let predicate = HKQuery.predicateForSamples(withStart: from, end: to, options: .strictStartDate)
         let sort = [NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)]
         let series: [HKHeartbeatSeriesSample] = try await withCheckedThrowingContinuation { cont in
@@ -146,6 +219,7 @@ final class HealthKitProvider: HealthDataProvider {
     // MARK: Sleep
 
     func sleepSegments(from: Date, to: Date) async throws -> [SleepSegment] {
+        try await ensureAuthorized()
         let type = HKCategoryType(.sleepAnalysis)
         let predicate = HKQuery.predicateForSamples(withStart: from, end: to, options: .strictStartDate)
         let sort = [NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)]
@@ -178,6 +252,7 @@ final class HealthKitProvider: HealthDataProvider {
     // MARK: Workouts
 
     func workouts(from: Date, to: Date) async throws -> [WorkoutSession] {
+        try await ensureAuthorized()
         let predicate = HKQuery.predicateForSamples(withStart: from, end: to, options: .strictStartDate)
         let sort = [NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)]
         let workouts: [HKWorkout] = try await withCheckedThrowingContinuation { cont in

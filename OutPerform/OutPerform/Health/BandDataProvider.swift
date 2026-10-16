@@ -28,7 +28,7 @@ final class BandDataProvider: HealthDataProvider {
 
     func requestAuthorization() async throws {
         // Creating the central manager is what triggers the Bluetooth prompt.
-        BandManager.shared.start()
+        await BandManager.shared.startWhenReady()
     }
 
     private var profile: BodyProfile {

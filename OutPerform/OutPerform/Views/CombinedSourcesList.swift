@@ -13,6 +13,11 @@ struct CombinedSourcesList: View {
     @Environment(AppModel.self) private var appModel
     @Binding var showGoogleConnect: Bool
     private let board = SourceStatusBoard.shared
+    @State private var appleNeedsAccess = false
+
+    private func refreshAppleAccess() async {
+        appleNeedsAccess = await HealthKitProvider().needsAuthorization()
+    }
 
     var body: some View {
         ForEach(SourceKind.allCases, id: \.self) { kind in
@@ -28,6 +33,7 @@ struct CombinedSourcesList: View {
         }
         Text("Apple Health and the band are read first. Google is only asked for what Apple Health is missing (e.g. HRV or skin temperature), so syncs stay fast. When sources overlap, OutPerform uses whichever has it first, then switches to the better one once it syncs. Heart rate and HRV: band → Apple Health → Google. Sleep: Apple Health → band → Google (one source per night, never mixed). Blood oxygen, skin temp and VO₂ max: Apple Health → Google.")
             .font(.caption2).foregroundStyle(.secondary)
+            .task { await refreshAppleAccess() }
     }
 
     private func binding(_ kind: SourceKind) -> Binding<Bool> {
@@ -35,7 +41,10 @@ struct CombinedSourcesList: View {
             get: { settings.combinedSources.contains(kind) },
             set: { on in
                 if on { settings.combinedSources.insert(kind) } else { settings.combinedSources.remove(kind) }
-                if kind == .band, on { BandManager.shared.start() }
+                if kind == .band, on { Task { await BandManager.shared.startWhenReady() } }
+                if kind == .appleHealth, on {
+                    Task { try? await HealthKitProvider().requestAuthorization(); await refreshAppleAccess() }
+                }
                 appModel.sourcesChanged()
             })
     }
@@ -73,7 +82,17 @@ struct CombinedSourcesList: View {
                 Text(BandManager.shared.pairedName.map { "Band: \($0)" } ?? "Pair your band").font(.caption)
             }
         case .appleHealth:
-            EmptyView()
+            if appleNeedsAccess {
+                Button("Allow Apple Health access") {
+                    Task {
+                        try? await HealthKitProvider().requestAuthorization()
+                        await refreshAppleAccess()
+                        appModel.sourcesChanged()
+                        await appModel.refresh()
+                    }
+                }
+                .font(.caption)
+            }
         }
     }
 }

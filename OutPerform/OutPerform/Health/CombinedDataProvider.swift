@@ -132,6 +132,9 @@ final class CombinedDataProvider: HealthDataProvider {
         for k in SourceKind.allCases { board.notUsed(k, reason(k)) }
         let kinds = active
         let local = kinds.filter { $0 != .google }
+        // Ask Apple Health for permission (if needed) before the timed calls,
+        // so a permission sheet the user is reading can't count as a timeout.
+        if local.contains(.appleHealth) { try? await apple.ensureAuthorized() }
         var results = await run(local, from: from, to: to, fetch)
 
         guard kinds.contains(.google) else { return results }

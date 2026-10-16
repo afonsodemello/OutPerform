@@ -96,13 +96,8 @@ final class BandManager: NSObject {
     private(set) var lastSampleAt: Date?
     private(set) var samplesThisSession = 0
     private(set) var beatsThisSession = 0
-    /// Current HR zone (1–5 by %HRmax), for the live card and zone coaching.
+    /// Current HR zone (0 below zone 1, then 1–5) from your zone settings.
     private(set) var liveZone: Int?
-
-    /// Haptic zone coaching: buzz on entering zone 5, once on dropping to zone 1.
-    var zoneCoaching: Bool {
-        didSet { defaults.set(zoneCoaching, forKey: Keys.zoneCoaching) }
-    }
 
     /// Called every `scoringInterval` while live data is flowing.
     var onScoringTick: (() -> Void)?
@@ -113,7 +108,6 @@ final class BandManager: NSObject {
     private enum Keys {
         static let pairedID = "band.pairedID"
         static let pairedName = "band.pairedName"
-        static let zoneCoaching = "band.zoneCoaching"
         static let restoreID = "mamilles.OutPerform.band"
     }
 
@@ -127,7 +121,6 @@ final class BandManager: NSObject {
     private var lastStoredSecond: Int?
 
     private override init() {
-        zoneCoaching = UserDefaults.standard.bool(forKey: Keys.zoneCoaching)
         super.init()
         if let s = defaults.string(forKey: Keys.pairedID) { pairedID = UUID(uuidString: s) }
         pairedName = defaults.string(forKey: Keys.pairedName)
@@ -145,6 +138,23 @@ final class BandManager: NSObject {
     }
 
     var isStarted: Bool { central != nil }
+
+    private var stateWaiters: [CheckedContinuation<Void, Never>] = []
+
+    /// Start Bluetooth without colliding with another permission popup. The
+    /// first time (Bluetooth permission not decided yet) it queues behind
+    /// any open popup and waits until the Bluetooth alert has been answered.
+    func startWhenReady() async {
+        guard central == nil else { return }
+        guard CBManager.authorization == .notDetermined else { start(); return }
+        try? await PermissionGate.shared.run { @MainActor in
+            guard self.central == nil else { return }
+            await withCheckedContinuation { cont in
+                self.stateWaiters.append(cont)
+                self.start()
+            }
+        }
+    }
     var isPaired: Bool { pairedID != nil }
 
     // MARK: Public actions
@@ -241,7 +251,8 @@ final class BandManager: NSObject {
 
         // Store at most one HR point per second; many bands notify faster.
         let second = Int(now.timeIntervalSince1970)
-        if second != lastStoredSecond {
+        let newSecond = second != lastStoredSecond
+        if newSecond {
             lastStoredSecond = second
             let point = HRPoint(t: now.timeIntervalSince1970, bpm: Double(m.bpm))
             Task { await StreamStore.shared.append(hr: point) }
@@ -264,7 +275,14 @@ final class BandManager: NSObject {
         liveBPM = Int(sorted[sorted.count / 2].rounded())
         lastSampleAt = now
 
-        updateZone()
+        if let bpm = liveBPM {
+            liveZone = ZoneSettings.shared.zone(for: bpm)
+            // Zone alerts and the workout recorder run at 1 Hz on smoothed HR.
+            if newSecond {
+                ZoneAlerter.shared.observe(bpm: bpm, at: now)
+                WorkoutRecorder.shared.observe(bpm: bpm, at: now)
+            }
+        }
 
         if now.timeIntervalSince(lastScoringTick) >= Self.scoringInterval {
             lastScoringTick = now
@@ -294,24 +312,14 @@ final class BandManager: NSObject {
         return out
     }
 
-    private func updateZone() {
-        guard let bpm = liveBPM else { liveZone = nil; return }
-        let hrMax = 208 - 0.7 * Double(AppSettings.shared.age)   // Tanaka (2001)
-        let pct = Double(bpm) / hrMax
-        let zone = pct >= 0.9 ? 5 : pct >= 0.8 ? 4 : pct >= 0.7 ? 3 : pct >= 0.6 ? 2 : 1
-        let previous = liveZone
-        liveZone = zone
-        guard zoneCoaching, let previous, previous != zone,
-              UIApplication.shared.applicationState == .active else { return }
-        let haptics = UINotificationFeedbackGenerator()
-        if zone == 5 && previous < 5 {
-            haptics.notificationOccurred(.warning)   // "ease off"
-        } else if zone == 1 && previous > 1 {
-            haptics.notificationOccurred(.success)   // "recovered"
-        }
-    }
-
     private func handleStateChange() {
+        // Release the permission queue only once the Bluetooth alert has
+        // actually been answered (iOS may report a state before that).
+        if CBManager.authorization != .notDetermined {
+            let waiters = stateWaiters
+            stateWaiters.removeAll()
+            waiters.forEach { $0.resume() }
+        }
         switch central.state {
         case .poweredOn:
             if isPaired {

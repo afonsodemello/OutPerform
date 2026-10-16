@@ -16,7 +16,7 @@ struct MainTabView: View {
             Tab("Today", systemImage: "sun.max.fill", value: 0) { TodayView() }
             Tab("Perform", systemImage: "bolt.circle.fill", value: 1) { FocusView() }
             Tab("Sleep", systemImage: "bed.double.fill", value: 2) { SleepDetailView() }
-            Tab("Strain", systemImage: "flame.fill", value: 3) { StrainDetailView() }
+            Tab("Exercise", systemImage: "figure.run", value: 3) { ExerciseView() }
             Tab("More", systemImage: "ellipsis.circle.fill", value: 4) { MoreView() }
         }
         .safeAreaInset(edge: .top, spacing: 0) { syncBanner }

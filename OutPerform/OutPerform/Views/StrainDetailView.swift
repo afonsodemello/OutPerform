@@ -10,12 +10,25 @@ import SwiftData
 import Charts
 
 struct StrainDetailView: View {
-    @Query(sort: \DailyRecord.date, order: .reverse) private var records: [DailyRecord]
-    private var latest: DailyRecord? { records.first { $0.dayStrain != nil } ?? records.first }
-
     var body: some View {
         NavigationStack {
             ScrollView {
+                StrainContent().padding()
+            }
+            .navigationTitle("Strain")
+        }
+    }
+}
+
+/// Day strain, activity strain, ACWR, monotony and history. Shared by the
+/// Strain screen and the Exercise tab.
+struct StrainContent: View {
+    @Query(sort: \DailyRecord.date, order: .reverse) private var records: [DailyRecord]
+    private var latest: DailyRecord? { records.first { $0.dayStrain != nil } ?? records.first }
+    /// The Exercise tab hides the big empty state under its own start card.
+    var showsEmptyState = true
+
+    var body: some View {
                 VStack(spacing: 16) {
                     if let r = latest, let strain = r.dayStrain {
                         NavigationLink { MetricDetailView(kind: .strain) } label: {
@@ -42,17 +55,13 @@ struct StrainDetailView: View {
                                  zoneLabel: r.monotony.map { $0 > 2 ? "Add variety" : "Good variety" },
                                  needNote: "Needs 7 nights of history.")
                         history
-                    } else {
+                    } else if showsEmptyState {
                         EmptyStateView(title: "No strain data",
                                        message: "Strain accumulates from your heart rate across the day. It'll appear after your first synced day.",
                                        systemImage: "flame")
                             .frame(minHeight: 360)
                     }
                 }
-                .padding()
-            }
-            .navigationTitle("Strain")
-        }
     }
 
     private func loadCard(title: String, kind: MetricKind, value: Double?,

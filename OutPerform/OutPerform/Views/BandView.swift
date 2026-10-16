@@ -43,7 +43,7 @@ struct BandView: View {
             }
         }
         .task {
-            band.start()
+            await band.startWhenReady()
             await loadSummary()
         }
         .onDisappear { band.stopScan() }
@@ -91,7 +91,7 @@ struct BandView: View {
                     VStack(alignment: .trailing, spacing: 0) {
                         Text("\(bpm)").font(.system(size: 40, weight: .bold, design: .rounded))
                             .contentTransition(.numericText())
-                        Text("bpm\(band.liveZone.map { " · Z\($0)" } ?? "")")
+                        Text("bpm\(band.liveZone.flatMap { $0 > 0 ? " · Z\($0)" : nil } ?? "")")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
@@ -165,11 +165,12 @@ struct BandView: View {
             if let m = band.manufacturer { LabeledContent("Manufacturer", value: m) }
             if let m = band.model { LabeledContent("Model", value: m) }
             if let f = band.firmware { LabeledContent("Firmware", value: f) }
-            @Bindable var manager = band
-            Toggle(isOn: $manager.zoneCoaching) {
+            NavigationLink {
+                ZoneSettingsView()
+            } label: {
                 VStack(alignment: .leading) {
-                    Text("Zone coaching")
-                    Text("Haptic when you reach zone 5, and when you're back in zone 1.")
+                    Text("Heart-rate zones & alerts")
+                    Text("Set your zones and when your phone notifies you.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
