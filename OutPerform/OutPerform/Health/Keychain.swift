@@ -2,7 +2,7 @@
 //  Keychain.swift
 //  OutPerform
 //
-//  Minimal Keychain wrapper for storing Google OAuth tokens securely.
+//  Minimal Keychain wrapper for Google OAuth tokens and AI provider keys.
 //
 
 import Foundation
@@ -21,6 +21,8 @@ enum Keychain {
         // First launch after install (or after a wipe) — clear any leftover tokens.
         delete("access_token")
         delete("refresh_token")
+        delete("ai.key.anthropic")
+        delete("ai.key.openai")
         UserDefaults.standard.set(true, forKey: marker)
     }
 

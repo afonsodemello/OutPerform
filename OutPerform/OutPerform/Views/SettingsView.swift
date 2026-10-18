@@ -78,6 +78,11 @@ struct SettingsView: View {
 
                 Section {
                     NavigationLink {
+                        AICoachSettingsView()
+                    } label: {
+                        Label("AI coach", systemImage: "sparkles")
+                    }
+                    NavigationLink {
                         ZoneSettingsView()
                     } label: {
                         Label("Heart-rate zones & alerts", systemImage: "heart.text.square")

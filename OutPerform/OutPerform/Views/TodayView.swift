@@ -69,6 +69,7 @@ struct TodayView: View {
                             calibratingHeader
                         }
                         summaryRings(today: today, recoveryFrom: scored)
+                        AICoachCard()
                         if let s = scored { recommendation(s) }
                         checkIn(today)
                     } else {

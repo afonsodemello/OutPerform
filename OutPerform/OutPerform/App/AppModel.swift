@@ -171,6 +171,16 @@ final class AppModel {
         return IllnessWatch.evaluate(Array(days))
     }
 
+    /// The health summary the AI coach receives (only when sharing is on).
+    func coachHealthSummary() -> String {
+        var descriptor = FetchDescriptor<DailyRecord>(sortBy: [SortDescriptor(\.date, order: .reverse)])
+        descriptor.fetchLimit = 14
+        let records = (try? engine.modelContextForReads.fetch(descriptor)) ?? []
+        return CoachContext.healthSummary(records: records, workouts: ExerciseStore.shared.sessions,
+                                          includeWorkouts: AICoach.shared.includeWorkouts,
+                                          illness: illnessSignal())
+    }
+
     /// Wipe all stored data and clear the widgets.
     func resetAllData() {
         engine.deleteAllData()

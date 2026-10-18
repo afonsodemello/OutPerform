@@ -121,6 +121,26 @@ skipped for that sync, and Settings shows each source's status. Each source can
 be turned on or off, and Google joins only once you're signed in, the band only
 once paired.
 
+## AI coach (optional, your own API key)
+
+A daily brief and a chat on the Today tab, answered by **Anthropic (Claude,
+default Claude Opus 5.5)** or **OpenAI (ChatGPT, default GPT-5)**
+(`AI/AIClient.swift`, `AI/AICoach.swift`, `AI/CoachContext.swift`).
+
+- **Off until you set it up** in Settings → AI coach: pick a provider and paste
+  your API key (stored in the Keychain). Requests go straight from the iPhone
+  to the provider, with no OutPerform server in between, and are billed to
+  your provider account.
+- **Your data is shared only if you opt in** ("Share my health data", off by
+  default), and then only as a text summary of your last 14 days of scores,
+  profile basics, zones and (optionally) recorded workouts. *Preview what's
+  sent* shows the exact text. Raw heart rate, heartbeats, GPS routes and device
+  IDs are never sent.
+- Replies stream in; the conversation is stored only on the phone. Models are
+  loaded from each provider's `/v1/models`. Claude requests opt into
+  Anthropic's server-side refusal fallback where the model supports it.
+- Not medical advice.
+
 ## Architecture
 
 ```

@@ -20,12 +20,6 @@
 			</array>
 		</dict>
 	</array>
-	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>OutPerform connects directly to your band over Bluetooth to record heart rate and heartbeats on this iPhone. Nothing is sent to the cloud.</string>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>OutPerform uses your location during workouts you start in the Exercise tab to measure distance, pace and your route. It stays on this iPhone.</string>
-	<key>NSMotionUsageDescription</key>
-	<string>OutPerform uses motion data during workouts to count steps, cadence, floors and elevation gain. It stays on this iPhone.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>bluetooth-central</string>
