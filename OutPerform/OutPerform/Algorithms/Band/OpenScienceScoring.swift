@@ -34,7 +34,7 @@ nonisolated public enum ScoringModel: String, CaseIterable, Codable, Sendable {
     public var displayName: String {
         switch self {
         case .outperform:  return "OutPerform classic"
-        case .openScience: return "Open-science (NOOP method)"
+        case .openScience: return "Open-science"
         }
     }
 }

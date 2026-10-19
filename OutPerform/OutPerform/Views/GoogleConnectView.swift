@@ -42,6 +42,8 @@ struct GoogleConnectView: View {
                     }
                 }
 
+                // Developer setup only: release builds use the built-in client ID.
+                #if DEBUG
                 Section("OAuth client ID") {
                     TextField("…apps.googleusercontent.com", text: $clientID)
                         .textInputAutocapitalization(.never)
@@ -50,6 +52,7 @@ struct GoogleConnectView: View {
                     Text("One-time setup: in Google Cloud Console create a project, enable the Google Health API, and create an **iOS** OAuth client. Paste its client ID here.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
+                #endif
 
                 Section {
                     Button {
@@ -65,12 +68,14 @@ struct GoogleConnectView: View {
                     .disabled(working || !clientLooksValid)
 
                     if signedIn {
+                        #if DEBUG
                         Button {
                             Task { await runDiagnostics() }
                         } label: {
                             Label(diagnosing ? "Testing…" : "Test connection (diagnostics)",
                                   systemImage: "stethoscope")
                         }.disabled(diagnosing)
+                        #endif
 
                         Button("Disconnect", role: .destructive) {
                             GoogleAuthManager.shared.signOut()
@@ -79,7 +84,7 @@ struct GoogleConnectView: View {
                         }
                     }
                 } footer: {
-                    Text("You'll be taken to Google to approve access to your heart rate, HRV, sleep, blood oxygen, respiratory rate, temperature and activity data. Nothing leaves your device afterward.")
+                    Text("You'll be taken to Google to approve access to your heart rate, HRV, sleep, blood oxygen, respiratory rate, temperature and activity data. Your data is processed on this iPhone.")
                 }
 
                 if let status { Section { Text(status).font(.caption).foregroundStyle(.secondary) } }

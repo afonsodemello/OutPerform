@@ -83,7 +83,7 @@ final class GoogleAuthManager: NSObject, ASWebAuthenticationPresentationContextP
 
     func signIn() async throws {
         guard GoogleHealthConfig.isConfigured else {
-            throw HealthDataError.network("Google Health isn't set up yet. Add your OAuth client ID in GoogleHealthConfig.swift (see README), then rebuild.")
+            throw HealthDataError.network("Google sign-in isn't available right now. Please try again later.")
         }
 
         let verifier = Self.randomURLSafe(length: 64)

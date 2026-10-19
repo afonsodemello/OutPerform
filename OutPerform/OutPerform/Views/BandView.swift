@@ -152,9 +152,9 @@ struct BandView: View {
     }
 
     private var setupHelpSection: some View {
-        Section("Fitbit Air setup") {
-            Label("Open the Google Health app → your Fitbit Air → turn on Share heart rate.", systemImage: "1.circle")
-            Label("Turn on Always visible so the band keeps broadcasting while OutPerform is in the background.", systemImage: "2.circle")
+        Section("Band setup") {
+            Label("Turn on heart-rate sharing (sometimes called broadcast mode) on your band, then tap Search for bands.", systemImage: "1.circle")
+            Label("If your band has an option to stay visible, turn it on so OutPerform keeps recording in the background.", systemImage: "2.circle")
             Label("Keep your iPhone within Bluetooth range — data is only recorded while it's connected.", systemImage: "3.circle")
         }
         .font(.callout)

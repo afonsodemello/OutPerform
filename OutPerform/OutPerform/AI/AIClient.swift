@@ -24,7 +24,7 @@ enum AIProviderKind: String, Codable, CaseIterable, Identifiable {
     var displayName: String {
         switch self {
         case .anthropic: return "Anthropic (Claude)"
-        case .openai:    return "OpenAI (ChatGPT)"
+        case .openai:    return "OpenAI"
         }
     }
 

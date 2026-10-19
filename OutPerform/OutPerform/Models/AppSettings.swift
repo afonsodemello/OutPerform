@@ -31,9 +31,9 @@ public enum DataSourceType: String, CaseIterable, Sendable, Codable {
         case .appleHealth:
             return "Reads directly from Apple Health on this iPhone (HealthKit). Best if your wearable already syncs to Health."
         case .googleHealth:
-            return "Connects to your Google account via the Google Health API (the platform replacing Fitbit). Requires sign-in and a configured OAuth client."
+            return "Sign in with your Google account to read your heart rate, sleep and activity from Google Health."
         case .bluetooth:
-            return "Pairs directly with your band (Fitbit Air or any standard heart-rate band) over Bluetooth. Heart rate and heartbeats are recorded on this iPhone and every score is computed here — no account, no cloud."
+            return "Pairs directly with a Bluetooth heart-rate band or chest strap. Heart rate and heartbeats are recorded on this iPhone and every score is computed here — no account needed."
         case .combined:
             return "Uses Apple Health, Google Health and your Bluetooth band at the same time. Each piece of data comes from whichever source has it first and best, so syncs fill in faster and gaps in one source are covered by another."
         case .demo:

@@ -22,7 +22,7 @@ struct AICoachCard: View {
             if coach.isConfigured {
                 configured
             } else {
-                Text("Get a daily brief and ask questions about your recovery, sleep and training, answered by Claude or ChatGPT using your own API key.")
+                Text("Get a daily brief and ask questions about your recovery, sleep and training, answered by Anthropic or OpenAI using your own API key.")
                     .font(.subheadline).foregroundStyle(.secondary)
                 Button { showSettings = true } label: {
                     Label("Set up AI coach", systemImage: "key.fill").frame(maxWidth: .infinity)

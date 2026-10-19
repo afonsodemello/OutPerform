@@ -90,7 +90,7 @@ struct ExerciseSession: Codable, Identifiable, Hashable {
     var zoneSeconds: [Double] = Array(repeating: 0, count: 6)
     /// Time (s) of each completed kilometre.
     var splits: [Double] = []
-    /// What the HR came from, e.g. "Fitbit Air".
+    /// What the HR came from (the paired band's name).
     var heartRateSource: String?
     /// Recovered after the app was closed mid-workout.
     var recovered = false

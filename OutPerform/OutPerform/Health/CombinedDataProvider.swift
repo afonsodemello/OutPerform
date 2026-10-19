@@ -74,7 +74,7 @@ final class CombinedDataProvider: HealthDataProvider {
         case .appleHealth:
             return apple.isAvailable() ? nil : "Not available on this device"
         case .google:
-            if !google.isAvailable() { return "Google sign-in isn't set up in this build" }
+            if !google.isAvailable() { return "Not available right now" }
             return GoogleAuthManager.shared.isSignedIn ? nil : "Not signed in"
         case .band:
             return BandManager.shared.isPaired ? nil : "No band paired"
