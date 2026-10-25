@@ -72,6 +72,7 @@ struct FocusView: View {
                         liveHeader(fi)
                         focusCurveCard(fi)
                         if let wi = workoutInputs { workoutCard(wi) }
+                        FitnessAgeCard()
                         feedbackCard
                         windowsCard(fi)
                         driversCard(fi)
@@ -80,11 +81,15 @@ struct FocusView: View {
                     }
                     .padding()
                 } else {
-                    EmptyStateView(
-                        title: "Not enough data",
-                        message: "Perform needs at least one synced night of sleep. Once that's in, you'll see your focus curve, best workout windows, and can log how you feel.",
-                        systemImage: "brain.head.profile")
-                        .frame(minHeight: 420)
+                    VStack(spacing: 16) {
+                        EmptyStateView(
+                            title: "Not enough data",
+                            message: "Perform needs at least one synced night of sleep. Once that's in, you'll see your focus curve, best workout windows, and can log how you feel.",
+                            systemImage: "brain.head.profile")
+                            .frame(minHeight: 320)
+                        FitnessAgeCard()
+                    }
+                    .padding()
                 }
             }
             .navigationTitle("Perform")
